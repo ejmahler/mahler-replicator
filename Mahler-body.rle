@@ -1,0 +1,171 @@
+# A variation of the "devore-rep" self-replicating machine that completes a copy of itself in less than 1/160 of the
+# time. See the comments for "Mahler-rep.rle" for an overview of the improvements from Devre-rep to Mahler-rep, and see
+# make-Mahler-tape.py for a script to write programs for this machine.
+#
+# This file contains some documentation of high-level differences between Devore-Rep and Mahler-rep.
+# 
+# Despite Mahler-rep looking very different from Devore-Rep, it shares almost all of its overall structure in common:
+# - It has a program tape in the bottom right, a data tape in the top right, and a construction arm in the top left.
+# - The top third of the machine is dedicated to carrying out the program's instructions:
+#	- Instructions that affect the contruction arm are in the top left
+#	- Instructions that can be toggled to affect either the data arm or construction arm are in the top middle
+#	- 2 instructions to move the data head left and right go in the top right
+# - The bottom right and bottom middle of the machine handle repeately reading bits from the program tape
+# - The bottom left of the machine is the instruction decoder, which decodes 4 binary bits in order to pass a signal
+#		up to one of 16 instructions along the top.
+# - The middle right is a large structure devoted to supporting branches in the program, by counting how far to move
+#		the program head in the case that an if statement is true or false.
+# - The middle left, just above the instruction decoder, is what I call the "ball return", a long chain of crossovers
+#		that allows the machine to begin reading the next instruction once the current instruction has been decoded.
+# - Attached to the program arm, data arm, and construction arm are small circuits that detect that a value has
+#		been read from the corresponding arm, and send out a short "repair" signal.
+#
+# The most visible difference, by far, is that there are 4 program read heads instead of one. Read signals are
+# duplicated to all four program heads, and the read responses are all merged into a single sequence, letting the
+# machine read all four bits of instuction at once, instead of reading one bit at a time.
+#
+# There is another important but more subtle difference: In devore-rep, the "return value" from construction arm and
+# data arm is passed down through the center of the machine to a prominent discriminator which decides whether or not
+# to jump. This requires several crossovers which strongly limit the layout of the top-center of the machine. Instead,
+# mahler-rep routes the return value around the top right of the machine to a storage area on the middle right. A
+# separate pair of instructions (jump_if_zero and jump_if_one) are used to jump if this stored value is zero or one,
+# respectively.
+#
+# Another minor strutural change is where we inject the sheath and signal for a new machine. In Devore-rep,
+# a unique circuit was placed in the bottom left to accept the incoming injection. In Mahler-rep, the construction arm
+# is modified to have an injection reciever on the end of it. At first glance this might seem strange, but the
+# injection process actually erases the injection receiver! It leaves behind a broken construction arm tip, which can
+# easily be repaired by the normal construction arm repair circuit.
+#
+# The injection receiver being the construction arm means that we need absolutely no special circuitry for injection,
+# and we can let the machine behave exactly as it would when finishing a read: Store the result of the read in the R
+# register and resume executing instructions. As a bonus, the injection reciever is very close to the location of the
+# construction arm head at the end of construction, so it takes a lot less code to inject the new machine once
+# construction has finished.
+#
+# - Elliott Mahler
+#
+x = 168, y = 108, rule = Devore2
+2A10.59A2.60A$.12A12.2A9.2A32.4A57.2A$2A9.2A12.A11.A34.2A58.A$11.A12.
+3A3.5A2.2A4.23A6.A6.6A29.16A2.A8.A$9.3A2.6A5.A4.A3.A2.4A2.A17.A3.A3.
+4A2.5A4.A24.6A13.2A2.A8.A$5A4.2A5.A2.A2.5A3.A9.A2.A17.A3.A3.2A4.A2.3A
+3.A6.19A3.3A13.A2.A4.5A$A3.A4.A6.A2.A2.A3.A3.A3.A5.A2.A6.5A6.3A.A3.A
+5.A4.A2.2A6.A16.3A4.A6.4A3.A2.2A3.A$A2.2A4.A6.4A2.A3.A3.A2.8A2.A6.2A
+2.4A4.4A3.A3.3A4.A2.6A2.A18.A4.8A2.A2.2A2.6A$A2.7A2.5A2.A2.5A3.A3.A4.
+2A2.A6.A3.A2.A4.A6.2A2.A2.6A.A4.A2.A2.10A6.A10.2A2.A2.5A3.3A2.A$A2.A
+4.5A2.2A2.A3.A6.A8.A3.A6.A3.A2.A3.2A7.A2.A2.A4.3A4.A2.A3.A2.A4.A2.5A
+10.A3.A2.A2.3A4.7A$A2.A7.2A2.A3.2A2.A6.A3.A4.A3.A5.3A2.5A2.6A3.A2.A2.
+A4.A5.2A2.A3.A2.A3.2A2.A2.3A.9A3.A2.A4.A7.A.2A$A2.5A3.A3.A3.5A2.9A4.
+2A2.A6.A3.A6.A4.A3.A2.A2.6A5.5A3.4A3.5A4.A3.A2.A.3A2.A2.A4.A10.4A$A6.
+A3.A2.5A3.2A2.A2.A3.A6.A2.A2.5A2.2A6.A3.2A2.2A2.A3.A9.A10.A3.A2.3A3.A
+3.A2.A3.A2.A2.2A3.2A2.4A3.A2.A$2A5.A3.A2.A3.A3.A3.A2.A2.3A.2A2.A2.A2.
+A6.6A2.A3.9A3.A9.A9.3A2.A4.A3.A3.4A3.A2.A3.A3.5A2.A3.A2.A$.A2.4A3.A2.
+A3.A3.A3.4A3.A3.A2.A2.A2.A6.A4.A2.A3.A11.A2.5A2.A10.A3.A4.A3.A6.A3.A
+2.2A2.A7.A2.A3.5A$.A2.A.3A2.A2.5A3.A3.A6.A3.A2.A2.A2.8A4.4A3.A11.A2.A
+3.A2.A10.2A2.6A3.A6.A3.A3.A2.A7.A2.5A$2A2.A3.A2.A5.A4.A10.5A2.A2.A3.A
+4.3A7.4A4.A.6A2.A2.2A2.A3.4A4.A6.A4.A4.3A3.A3.A2.5A3.4A$A3.A3.A2.A5.A
+4.A10.A6.A2.A3.A6.A7.A.4A2.A3.A2.A2.A2.5A3.A2.A4.A6.A4.2A3.2A4.A2.2A
+5.2A$A3.5A2.A2.4A4.A3.4A3.A6.A2.A2.6A2.A7.A4.A2.A3.A2.A2.4A2.3A2.A2.A
+2.3A5.5A2.A3.A5.A2.A7.A$3A5.A2.A2.A.3A3.5A2.A2.3A.2A2.A2.A2.A4.A2.A7.
+A4.A2.A3.4A2.A7.A2.A2.A2.A7.A3.A2.A3.A5.A2.A7.A$2.A5.A2.A2.A3.A6.2A2.
+A3.A3.A2.A2.A2.A4.A2.A7.A4.A2.3A4.2A.A7.A2.A2.A2.A7.A3.A2.A2.5A2.A2.
+6A2.A$2.A2.7A2.A3.A6.A3.A3.A3.A2.A2.A2.9A4.A2.A3.3A3.A4.8A3.A2.A2.A2.
+2A6.5A2.A2.A3.A2.A7.A2.A$3A2.A4.3A.5A6.A3.A3.5A2.A2.A6.A2.7A2.A4.A4.A
+6.A4.A3.A2.A2.A2.7A4.A3.A2.A3.A2.A7.A2.2A$A4.A6.A5.A3.5A2.A3.A6.A2.A
+6.A5.A2.A2.6A4.A6.A4.5A2.A2.A8.A4.A3.A2.5A2.A3.5A3.A$A3.6A2.A5.A3.A3.
+A2.A3.A6.A2.A2.6A4.A2.A2.A5.5A6.6A2.5A2.A8.A4.5A5.A3.A3.A2.3A2.A$A3.A
+4.A2.A5.A3.A3.A2.A2.3A.2A2.A2.A2.A4.A4.A2.A2.A5.A14.A5.A4.A2.4A2.A5.A
+.3A4.A3.A3.A4.A2.A$A3.A4.A2.A5.A3.5A2.A3.A3.A2.A2.A2.A4.A2.6A2.A5.A
+14.A5.A3.2A2.A2.6A3.A3.A4.5A2.3A3.A2.A4.16A$A3.9A5.A4.A5.A3.A3.A2.A2.
+A2.6A2.2A6.A5.A13.8A3.A3.A6.2A3.A3.A5.A.3A2.A4.A2.3A2.A13.2A$A7.A2.3A
+4.A4.A5.A3.5A2.A2.A3.A6.A7.A5.A13.A4.A5.A2.2A7.A2.6A5.A3.A2.6A3.5A14.
+A$4A4.A4.A4.A3.5A2.A3.A6.A2.A2.3A5.A7.A5.A13.A4.A5.10A2.A2.A4.4A2.A3.
+A7.A3.A10.5A3.A2.4A$3.A4.A4.A4.A3.A3.A2.A3.A6.A2.A3.A5.2A2.6A3.3A2.A
+2.6A2.6A13.2A2.A2.A4.A2.A2.5A7.2A2.A10.A3.A3.A2.A2.A$3.A3.7A4.A3.A3.A
+2.A2.3A.2A2.A2.A3.A3.7A3.3A2.A2.6A4.A6.A15.A2.A2.6A2.A6.A5.A2.A2.A2.
+6A2.A7.A2.A2.A$4A3.A4.A5.A3.5A2.A3.A3.A2.A2.A3.5A4.2A5.A2.A2.A.A2.A4.
+A6.A10.A4.A2.A6.A3.A6.A2.4A2.A2.A2.A4.A2.A3.A3.A2.A2.A$A6.A4.A5.A6.A
+3.A3.A3.A2.A2.A3.2A7.A6.A2.A2.A4.A4.8A3.8A4.A2.A6.A3.A2.5A2.A2.A2.A2.
+A2.A4.A2.A2.6A2.A2.A$A3.9A5.A6.A3.A3.5A2.A2.A3.A8.A6.A2.A2.A4.6A10.A
+2.A2.4A2.A2.4A3.A3.A2.A6.A2.4A2.A2.A2.3A2.A3.A2.5A2.A$5A6.A6.6A.A3.A
+3.A6.A2.5A3.6A6.A2.A2.A20.A2.A2.A2.A2.A4.6A2.2A2.A4.6A5.A2.A3.5A6.A6.
+A$3.2A6.A6.2A2.4A3.A3.A6.A5.A4.2A10.A2.A2.A20.A2.A5.A2.A4.A7.5A.A2.2A
+9.A2.A3.A3.A3.A2.A6.4A$3.A5.5A4.A3.A6.A2.3A.2A2.2A4.A4.A11.A2.A2.A20.
+A2.A5.A2.6A7.A3.6A10.A2.5A3.5A2.8A2.A$4A5.A3.A4.A3.A6.A3.A3.A2.4A2.2A
+3.A2.10A2.A2.22A2.7A6.10A5.A13.A6.A17.A2.A$A.5A2.A3.A2.3A3.A6.A3.A3.A
+5.A3.A2.2A2.A7.5A2.A60.6A6.A.A15.A2.2A$A5.4A3.A2.A2.4A6.A3.5A5.A3.A2.
+A3.A7.A4.3A60.A3.20A5.3A2.A$A5.A2.5A2.A2.A.9A4.A5.4A3.A2.A3.10A3.A2.
+61A13.A7.2A6.A3.A$A4.2A4.A4.A2.A8.4A2.A5.A4.3A2.A3.A3.A3.A3.2A2.2A81.
+A2.5A3.A$7A4.A4.A2.A11.A2.2A4.A4.A4.A3.A3.A2.3A2.A2.2A74.6A2.A2.A3.A
+3.A$.A2.A4.3A4.A2.A2.A8.A3.A4.A4.A4.A2.3A2.A3.A3.A2.A2.74A4.4A2.A2.2A
+3.2A$.A2.A4.A4.3A2.A2.6A2.3A2.6A3.2A.A2.A3.A3.5A3.A2.A2.2A2.A76.A2.A
+2.3A2.4A$.4A2.3A4.A4.A3.A3.A3.A3.A3.A4.4A2.A3.5A4.4A2.A2.A3.A69.4A3.A
+2.4A4.A2.A$.A3.3A3.4A4.A3.A3.A3.A2.3A2.A4.A2.A2.A7.A4.A5.A2.A2.2A2.
+11A3.13A3.13A3.13A3.6A2.2A2.3A8.A2.A$5.A5.A3.5A2.3A2.2A2.A3.A3.A4.A2.
+A2.A7.A4.A5.A2.A2.A2.2A8.2A3.A11.A3.A11.A3.A11.A3.A3.2A2.4A2.A7.2A2.A
+$4.2A5.A3.2A6.A3.5A3.5A2.6A2.A7.A4.A4.2A2.A2.A2.A10.2A2.A11.2A2.A11.
+2A2.A11.2A2.A3.A6.A2.A2.7A2.A$5A3.5A2.A7.A3.A2.6A6.2A6.A5.3A4.A2.7A2.
+A2.A2.6A2.5A3.6A2.5A3.6A2.5A3.6A2.5A3.A6.A2.A2.A3.A4.A$A7.A3.A2.A7.5A
+7.A6.A6.2A5.A6.A2.2A3.2A2.A2.A2.A7.A2.3A2.A7.A2.3A2.A7.A2.3A2.A7.A2.
+3A2.5A2.A2.A2.A3.A4.A$A7.A3.A2.A7.2A2.A7.A6.A6.A6.A6.A2.A4.A3.A2.A2.A
+7.A4.A2.A7.A4.A2.A7.A4.A2.A7.A4.A2.A2.5A2.A2.5A2.3A$A7.5A2.A7.A3.A6.
+2A5.2A5.2A5.2A5.2A2.A4.A3.A2.A2.A2.A4.2A3.A2.A2.A4.2A3.A2.A2.A4.2A3.A
+2.A2.A4.2A3.A2.A2.A6.A2.A2.2A2.A$A8.A5.A7.A3.A2.6A2.5A2.5A2.5A2.8A4.A
+3.A2.A2.4A.A2.6A2.4A.A2.6A2.4A.A2.6A2.4A.A2.6A2.5A5.A5.A3.A$A8.A5.A5.
+3A2.2A2.2A3.A2.2A2.A2.2A2.A2.2A2.A2.2A4.2A4.A3.A2.A5.6A10.6A10.6A10.
+6A7.2A3.6A4.2A3.A$A7.2A4.2A5.A4.5A4.A2.A3.A2.A3.A2.A3.A2.A5.A5.A3.A2.
+A5.A.A.2A10.A.A2.A10.A.A2.A10.A.A2.A7.A4.2A3.7A3.A$A2.7A2.4A5.A2.3A2.
+2A4.4A3.4A3.4A3.4A5.A5.A3.A2.4A2.A4.A10.A4.A10.A4.A10.A4.A7.A4.A4.A9.
+A$A2.2A4.A2.2A.A5.A2.2A3.A7.2A5.A4.A8.2A3.3A5.A3.A5.A2.A4.2A9.A4.2A9.
+A4.2A9.A4.2A6.6A4.2A6.A.A$A2.A5.A2.A2.A4.2A2.A4.A7.A6.A4.A8.A4.2A6.A
+3.A5.A2.3A2.9A2.3A2.9A2.3A2.9A2.3A2.8A7.14A$A2.A3.6A2.A4.5A4.2A4.3A3.
+4A4.A4.5A4.A2.6A3.4A2.A7.A7.A7.A7.A7.A7.A7.A6.A7.A7.A2.A$A2.A3.2A6.6A
+8.4A2.2A4.2A6.A4.2A7.A2.2A10.A2.A7.A7.A7.A7.A7.A7.A7.A6.4A4.A7.A$A2.A
+3.A7.A16.A2.A5.A4.5A3.A8.A2.A4.5A2.A2.A7.A3.5A3.5A3.5A3.5A3.5A3.5A2.
+5A2.A4.A6.2A$A2.A3.10A15.A2.A5.6A2.A4.A8.A2.A4.A3.A2.A2.A7.A3.A2.2A3.
+A2.2A3.A2.2A3.A2.2A3.A2.2A3.A2.2A2.A2.2A2.A4.A2.6A$A2.A3.A3.A3.A16.A
+2.2A4.A3.A3.A4.A8.4A2.3A3.A2.A2.A7.A6.A7.A7.A7.A7.A7.A6.A3.A4.A2.A2.A
+$A2.A3.A3.A2.3A15.A3.A3.3A2.A2.3A3.A10.2A3.3A2.A2.A2.A7.2A5.A7.A7.A7.
+A7.A7.A6.A2.3A3.A2.A2.A$A2.A2.3A2.A3.A15.2A3.A4.A3.A3.A4.A4.5A2.A3.A
+4.A2.A2.5A3.55A3.A4.A2.4A$A2.A3.A3.5A6.15A4.A3.5A4.A4.A3.A2.A3.A4.A2.
+A2.A2.6A3.2A6.2A6.2A6.2A6.2A6.2A5.2A.7A2.A2.A.A$A2.A3.5A10.A6.A11.5A
+4.5A2.3A3.A2.A3.6A2.A2.A7.A3.A7.A7.A7.A7.A7.A6.A2.2A4.A2.A4.A$A2.A7.A
+10.A6.A15.A4.A2.2A3.3A2.A2.A3.A7.A2.A7.A3.5A3.4A4.4A4.4A4.4A3.2A5.2A
+2.A5.A2.A4.A$A2.A7.8A3.5A2.A2.A2.5A5.A4.A3.A3.A4.A2.A3.A7.A2.A7.4A3.
+2A5.2A6.2A6.2A6.2A2.3A4.3A2.A2.A2.A2.A2.3A$A2.A14.A3.A3.A2.A2.A2.A3.A
+5.6A3.A3.A4.A2.5A2.3A2.A2.A10.A4.A6.A7.A7.A7.A2.A6.A4.A2.4A2.A2.A$A2.
+A14.A2.3A2.A2.A2.4A3.A14.A3.6A5.2A4.A2.A2.A15.A6.A7.A7.A7.A2.A6.A4.A
+8.A2.A$A2.A14.A3.A3.A2.A4.3A2.A14.A3.A11.A4.A2.A2.A15.47A8.A2.6A$A2.A
+14.A3.8A4.A4.A14.A3.A11.A2.A.A2.A2.A3.13A54.A2.A4.A$A2.A14.A7.A.4A2.A
+4.A14.5A2.3A2.10A2.A2.A3.A6.2A58.A2.A4.A$A2.A14.A12.A2.6A17.2A4.A2.A
+6.A4.A2.A3.A6.A17.43A2.3A2.A$A2.A14.2A11.A2.A23.A4.A2.A11.A2.A2.6A2.A
+6.12A45.5A$A2.A15.A4.5A2.A2.A23.A2.A.A2.A11.A2.A2.A4.A2.A6.A3.A6.A45.
+A$A2.A8.A6.A4.A3.A2.4A2.3A18.6A2.A11.A2.A2.A4.A2.A5.3A2.A5.3A14.31A$A
+2.17A2.3A3.A4.2A4.A18.A2.A4.A2.5A4.A2.A2.6A2.A6.A3.A6.A15.A$4A5.A2.A.
+A3.2A3.3A2.A5.A4.A18.A7.A3.A2.A4.A2.A2.A3.A3.4A2.6A5.2A15.A$2.2A5.A4.
+A4.A3.A4.A5.A2.A.A17.2A7.A3.A2.A3.2A2.A2.A3.A6.A3.A4.7A15.A7.A$2.A6.A
+4.A4.A3.A4.A5.6A15.12A3.4A3.A3.A2.3A.A6.A3.A4.2A4.A15.A5.6A$2.A5.7A4.
+A3.6A5.A2.A17.A14.A2.2A2.A2.2A3.7A3.A3.A4.A5.A10.A4.A5.A.A2.A2.4A5.5A
+$2.A6.A9.A3.A10.A20.A14.A2.5A2.A4.A5.A3.A3.3A2.A2.8A2.5A4.A10.A2.A2.A
+5.A$2.A6.A9.A3.A10.A20.A2.A10.2A4.A4.A2.3A5.A3.A4.5A2.A3.A.2A2.A3.A4.
+A10.A2.A2.A5.A$2.3A3.2A9.5A2.4A4.12A2.8A2.13A4.A4.A2.A2.7A2.A4.A3.A2.
+A3.A2.A2.A3.A4.A4.7A2.A2.A.A3.A$3.7A12.2A5.A15.A2.A9.A3.A12.A4.A2.A2.
+A5.A2.A4.A3.A2.5A2.10A2.A4.A5.A2.A2.7A$3.A19.A4.3A14.A2.A9.A3.A11.2A
+4.A2.A2.A5.A2.A4.2A.3A2.A13.5A4.A5.A2.A4.A2.4A$3.A19.2A4.A15.4A2.8A2.
+2A11.4A2.A2.A2.7A2.A8.A3.A13.A8.7A2.3A7.4A$3.A20.A4.A17.2A5.A2.2A9.7A
+2.A2.A2.A3.A7.3A6.A2.5A10.A10.A2.2A4.A7.A$4A20.6A18.A9.A9.A8.A2.A2.A
+3.A8.2A6.A2.A3.A2.5A2.2A10.A2.A5.A3.5A$A2.21A3.A20.A9.A3.A5.A8.A2.A2.
+A3.5A5.4A3.A2.A3.A2.A3.A2.6A6.4A4.2A3.A$A22.A3.A4.17A2.8A.6A2.A2.A5.A
+2.A2.A3.A3.A5.A2.A3.A2.5A2.A2.2A2.A3.2A6.A2.7A3.A$2A21.A3.6A14.2A4.2A
+5.A.A2.A2.7A2.A2.A2.A3.A3.A5.A2.A3.A2.A2.A3.A2.5A4.A6.A12.6A$27A21.2A
+4.A10.A2.A5.A2.A2.A2.A3.3A.A5.5A2.A2.A2.8A2.3A3.A6.A16.4A$A48.A4.A10.
+A2.A5.A2.A2.A2.A4.4A5.A6.A2.A14.A3.A2.5A2.4A10.A$A48.A4.A3.8A2.A2.A2.
+A2.A2.A2.A4.A7.2A6.A2.3A12.A3.A2.A3.A2.A2.4A2.6A$A2.A5.A5.A5.A.A25.A
+4.A3.A5.A3.A2.4A2.A2.A2.4A.A7.9A3.2A2.11A3.A2.A2.2A2.A2.A.2A2.A$25A
+24.A4.A3.A5.A3.A4.A3.A2.A4.4A.4A2.A3.2A7.A2.A4.A3.3A2.A2.A2.5A2.A2.A
+2.A$A2.A2.A2.A2.A2.A2.A2.A2.4A21.A4.A3.5A.A3.A3.3A2.A2.A4.A4.A2.4A4.A
+7.4A4.A5.A2.A2.A2.A3.4A2.A2.7A$A5.A5.A5.A5.A2.A21.A4.A6.4A8.A6.A4.A4.
+A2.A7.A7.A2.A3.3A4.A2.A2.4A9.A7.4A$A2.A2.A2.A2.A2.A2.A2.A2.A2.A21.A4.
+2A5.A2.A8.A6.A4.6A2.A5.3A7.A2.A4.A3.3A2.A14.2A7.A$4A2.4A2.4A2.4A2.5A
+20.A4.8A2.17A9.4A5.A9.6A2.5A3.2A14.10A$49.A18.2A6.2A20.2A25.17A$49.A
+18.A8.A20.4A23.A$49.20A8.22A2.25A!

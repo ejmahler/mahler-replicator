@@ -1,0 +1,79 @@
+# A demo of the "bounce coder" circuit which transforms any signal into a signal of type 6.
+#
+# The name comes from the term "Coder" from the Codd ruleset, where "Coder" is the name of a circuit that converts
+# signals from one type to another, and the word "bounce", which refers to the way the signals apper to move: They
+# split at one corner of the circuit, and collide into each other at the opposite corner. After they collide,
+# they appear to bounce back the way they came, converting to 6 in the process.
+#
+# Bounce coders are borth very flexible and very compact, relative to the old square coder design that required placing
+# three square coders in a row.
+#
+# The first row demonstrates what I think is the most important capability of the bounce coder: 
+# It's trivial to express "take whatever signal I pass in and follow it with a 6", in two different ways.
+# In each of them, we pass an input signal from the bottom, and the output iss 2 signals:
+# The original signal, followed by a 6.
+#
+# The left 4 circuits pass the output out the bottm right of the coder, while the right 4 circuits pass the output out
+# the top left. The outputs are equivalent either way, which demonstrates why bounce coders are so versatile: 
+# Square/rectangle coders have to send their output out in one specific direction, while bounce coders can send their
+# output multiple directions, allowing for much mre compact designs.
+#
+# The second row demonstrates another useful property: With a triode on the corner instead of just a T junction, 
+# we can throw away the original signal and only pass out a 6.
+#
+# The final row deomonstrates a few niche uses (from left to right):
+# - Bounce a 6 back to the input, rather than sending it to any output
+# - Pass the original signal through, but bounce a 6 back to the input
+# - Bounce the 6 back and forth internally, sending each "backwards" bounce as output
+# - Bounce the 6 back and forth internally, sending the input signal, and both forward and backward bouncesas oututs
+# 	- (The above two can be combined with a gate that stops the bounce after a certain amount of time.
+#		If it's timed right, a 6 can be finally bounced out the input
+# - Any signal following a 4 or 5 needs a delay of 6 cycles between signals, but for 6 and 7, the delay is only 4.
+#		These last two demonstrate how to slightly modify the bounce coder to get a delay of 4 instead of 6.
+# 
+x = 116, y = 106, rule = Devore2
+76.A11.A11.A11.A$76.A11.A11.A11.A$76.A11.A11.A11.A$76.A11.A11.A11.A$
+76.A11.A11.A11.A$76.A11.A11.A11.A$76.A11.A11.A11.A$76.A11.A11.A11.A$
+76.A11.A11.A11.A$76.A11.A11.A11.A$76.A11.A11.A11.A$76.A11.A11.A11.A$
+76.A11.A11.A11.A$76.A11.A11.A11.A$25.A17.A32.A11.A2.A8.A2.A8.A$7.A17.
+A17.A17.A14.A2.A8.A2.A8.A2.A8.A2.A$4.4A14.4A14.4A14.4A14.4A8.4A8.4A8.
+4A$4.A2.A14.A2.A14.A2.A14.A2.A14.A2.A8.A2.A8.A2.A8.A2.A$4.A2.A14.A2.A
+14.A2.A14.A2.A14.A2.A8.A2.A8.A2.A8.A2.A$.12A6.12A6.12A6.12A6.7A5.7A5.
+7A5.7A$.2A9.A6.2A9.A6.2A9.A6.2A9.A6.2A10.2A10.2A10.2A$.A10.A6.A10.A6.
+A10.A6.A10.A6.A11.A11.A11.A$.A10.A6.A10.A6.A10.A6.A10.A6.A11.A11.A11.
+A$.F10.A6.F10.A6.F10.A6.F10.A6.F11.F11.F11.F$B.B9.A5.B.B9.A5.B.B9.A5.
+B.B9.A5.B.B9.B.B9.B.B9.B.B$BAB9.A5.BAB9.A5.BAB9.A5.BAB9.A5.BAB9.BAB9.
+BAB9.BAB$BAB9.A5.BAB9.A5.BAB9.A5.BAB9.A5.BAB9.BAB9.BAB9.BAB$BAB9.A5.B
+AB9.A5.BAB9.A5.BAB9.A5.BAB9.BAB9.BAB9.BAB$BAB9.A5.BAB9.A5.BAB9.A5.BAB
+9.A5.BAB9.BAB9.BAB9.BAB$BAB9.A5.BAB9.A5.BAB9.A5.BAB9.A5.BAB9.BAB9.BAB
+9.BAB$BAB9.A5.BAB9.A5.BAB9.A5.BAB9.A5.BAB9.BAB9.BAB9.BAB$BAB9.A5.BAB
+9.A5.BAB9.A5.BAB9.A5.BAB9.BAB9.BAB9.BAB$BAB9.A5.BAB9.A5.BAB9.A5.BAB9.
+A5.BAB9.BAB9.BAB9.BAB$BAB9.A5.BAB9.A5.BAB9.A5.BAB9.A5.BAB9.BAB9.BAB9.
+BAB$BAB9.A5.BAB9.A5.BAB9.A5.BAB9.A5.BAB9.BAB9.BAB9.BAB$BAB9.A5.BAB9.A
+5.BAB9.A5.BAB9.A5.BAB9.BAB9.BAB9.BAB$BAB9.A5.BAB9.A5.BAB9.A5.BAB9.A5.
+BAB9.BAB9.BAB9.BAB$BAB9.A5.BAB9.A5.BAB9.A5.BAB9.A5.BAB9.BAB9.BAB9.BAB
+$BAB9.A5.BAB9.A5.BAB9.A5.BAB9.A5.BAB9.BAB9.BAB9.BAB$BGB9.A5.BDB9.A5.B
+EB9.A5.BFB9.A5.BGB9.BDB9.BEB9.BFB$B.B9.A5.B.B9.A5.B.B9.A5.B.B9.A5.B.B
+9.B.B9.B.B9.B.B$BAB9.A5.BAB9.A5.BAB9.A5.BAB9.A5.BAB9.BAB9.BAB9.BAB5$
+7.A$4.4A$4.A2.A$4.A2.A$.7A10.8A$.2A3.7A5.A2.A3.2A$.A10.A5.A2.A3.4A$.A
+10.A5.4A6.A$.F10.A5.A.2A6.F$B.B9.A7.A6.B.B$BAB9.A7.A6.BAB$BAB9.A7.A6.
+BAB$BAB9.A7.A6.BAB$BAB9.A7.A6.BAB$BAB9.A7.A6.BAB$BAB9.A7.A6.BAB$BAB9.
+A7.A6.BAB$BAB9.A7.A6.BAB$BAB9.A7.A6.BAB$BAB9.A7.A6.BAB$BAB9.A7.A6.BAB
+$BAB9.A7.A6.BAB$BAB9.A7.A6.BAB$BAB9.A7.A6.BAB$BGB9.A7.A6.BGB$B.B9.A7.
+A6.B.B$BAB9.A7.A6.BAB7$7.A12.A53.A$4.4A9.4A50.4A$4.A2.A9.A2.A50.A2.A$
+4.A2.A9.A2.2A12.5A13.5A14.A2.6A$.7A6.12A5.4A3.A10.4A3.A11.7A4.A6.8A$.
+A12.A10.A5.A2.A3.2A9.A2.A3.2A10.2A9.A6.A2.A3.2A$.A12.A10.A5.A2.A3.4A
+7.A2.A3.4A8.A10.A6.A2.A3.4A$.A12.A10.A5.4A6.A7.4A6.A8.A10.A6.4A6.A$.F
+12.F10.A5.A.2A6.F7.A2.A6.F8.F10.A6.A.A7.F$B.B10.B.B9.A7.A6.B.B9.A5.B.
+B6.B.B9.A8.A6.B.B$BAB10.BAB9.A7.A6.BAB9.A5.BAB6.BAB9.A8.A6.BAB$BAB10.
+BAB9.A7.A6.BAB9.A5.BAB6.BAB9.A8.A6.BAB$BAB10.BAB9.A7.A6.BAB9.A5.BAB6.
+BAB9.A8.A6.BAB$BAB10.BAB9.A7.A6.BAB9.A5.BAB6.BAB9.A8.A6.BAB$BAB10.BAB
+9.A7.A6.BAB9.A5.BAB6.BAB9.A8.A6.BAB$BAB10.BAB9.A7.A6.BAB9.A5.BAB6.BAB
+9.A8.A6.BAB$BAB10.BAB9.A7.A6.BAB9.A5.BAB6.BAB9.A8.A6.BAB$BAB10.BAB9.A
+7.A6.BAB9.A5.BAB6.BAB9.A8.A6.BAB$BAB10.BAB9.A7.A6.BAB9.A5.BAB6.BAB9.A
+8.A6.BAB$BAB10.BAB9.A7.A6.BAB9.A5.BAB6.BAB9.A8.A6.BAB$BAB10.BAB9.A7.A
+6.BAB9.A5.BAB6.BAB9.A8.A6.BAB$BAB10.BAB9.A7.A6.BAB9.A5.BAB6.BAB9.A8.A
+6.BAB$BAB10.BAB9.A7.A6.BAB9.A5.BAB6.BAB9.A8.A6.BAB$BAB10.BAB9.A7.A6.B
+AB9.A5.BAB6.BAB9.A8.A6.BAB$BGB10.BGB9.A7.A6.BGB9.A5.BGB6.BGB9.A8.A6.B
+GB$B.B10.B.B9.A7.A6.B.B9.A5.B.B6.B.B9.A8.A6.B.B$BAB10.BAB9.A7.A6.BAB
+9.A5.BAB6.BAB9.A8.A6.BAB!

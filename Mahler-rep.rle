@@ -1,0 +1,613 @@
+# A self-replicating computer based off the "devore-rep" machine. It makes a copy of itself in 628 million generations.
+#
+# Zoom in on the left-hand end of the line to see the main machine. A step size of 8^0 can be used to watch the machine
+# execute individual instructions, but to watch it complete a copy of itself, a step size of 8^4 or higher is
+# recommended.
+#
+# See make-Mahler-tape.py for the script that wrote the tapes for this machine, and for more information about the
+# encoding. See the other patterns in this folder for information about the machine body and the Devore ruleset.
+#
+# These comments contain analysis and measurements of Mahler-rep and Devore-rep's execution.
+#
+# SECTION 1: Overview
+# 	The time it takes for Devore-rep and Mahler-rep to copy themselves can be broken into 3 components: 
+#
+# 1. Data tape cost:
+#	A sequential scan through the data tape is O(n^2) in the size of the tape. We expect that machine execution time
+#	will be at least in part dominated by the time spent waiting for reads of the data tape.
+#	
+#	Devore-rep does 3 passes over a data tape of length 105442, so we expect Devore-rep to spend a total of
+#	3 * 105442^2 = 33.35 billion cycles waiting for data tape reads.
+#
+#	Mahler-rep effectively does 2 and 1/32 passes over a data tape of length 15507, so we expect Mahler-rep to spend
+#	2.03 * 15507^2 = 488.6 million cycles waiting for the data tape. This is around 1.46% of Devore-rep.
+#
+# 2. Construction phase read cost:
+#	Each machine has overhead from reading the construction head when retracting it during the construction phase.
+#	We can estimate the cost of these reads at: Height * MeanWidth * (Height + MeanWidth + Buffer), where "Buffer" is
+#	the distance along the construction arm to the location of the new machine.
+#
+#	For Devore-rep, this estimated cycle time is 117.3 million cycles.
+#	For Mahler-rep, we multiply by an extra 1/32 for reasons that will be explained later, giving an estimated cycle
+#	time of 148.2 thousand cycles.
+#
+#	Time spent waiting for the construction arm is insignifcant. This section is left in to answer any questions
+#	about how much time the construction arm reads take, but it can otherwise be ignored.
+#
+# 3. Instruction execution overhead:
+#	Finally, whatever is left over is program execution time: Time that the machine spends reading intructions,
+#	branching, etc. We should expect that the overhead will be O(N) in the size of the data tape, as each program
+#	spends almost all of its time reading a bit from the data tape, executing a handful of instructions in response,
+#	reading another bit, executing another handful of instructions, etc.
+#
+#	For Devore-rep, the overhead is 100.7 billion - 33.35 billion - 117.3 million = 67.28 billion cycles.
+#		Considered per bit of data tape, that's 638 thousand cycles of overhead per bit.
+#
+#	For Mahler-rep, the overhead is 628.3 million - 488.6 million - 148.2 thousand = 139.7 million cycles.
+#		Considered per bit of data tape, that's 9 thousand cycles of overhead per bit.
+#
+# 	By far, the biggest improvement in completion time comes from reduction of overhead.
+#
+#
+#
+# SECTION 2: Data Tape Improvements
+# 	We saw in Section 1 that Mahler-rep spends 1.46% as many cycles waiting for data tape reads. There are three changes
+# 	that contribute to this improvement:
+#
+# 1. Mahler-rep has a smaller footprint than devore-rep. If we were to serialize the machines as a long string of
+#		symbols (Each symbol meaning one of "Write a 0", "write a 1", "Start a new row", or "End"), Devore-rep is
+#		comprised of 92,701 such symbols, and Mahler-rep only 17,456 symbols, which is around 19% as many.
+#
+# 		Since reading the data tape from one end to the other is O(n^2), we should expect to spend 19%^2 = 3.6% as
+# 		many cycles waiting for data tape reads.
+#
+#		The reduction in symbol count comes from a few main things:
+# 		- Discovery of the "switch" circuit, used extensively to send a signal in one of two directions based on
+#			internal machine state. See "switch.rle" for some demonstrations of the switch.
+# 		- Discovery of the "bounce coder" circuit, a very compact and flexible way to copy and convert signals.
+#			Both machines contain numerous circuits to convert between "7" signals and other signal types, and
+#			the bounce coder makes the most space-costly conversion (7->6) much more compact.
+#			See "bounce-coder.rle" for some demonstrations of the bounce coder.
+#		- Every single circuit has been redesigned to be smaller and more compact. To be fair to Devore-rep, the
+#			designers were very clearly not focusing on compactness, but instead on correctness and ease of debugging,
+#			so there was a lot of low-hanging fruit to improve upon.
+#
+# 2. Mahler-rep uses a new encoding with better compression. Devore-rep's data tape encoding requires 1.14 bits per 
+#		symbol, while mahler-rep only requires 0.89, which is 78% of the original. If we square this reduction and 
+#		multiply it with the 3.6% from above, we expect mahler-rep to spend around 2.2% as many cycles as devore-rep 
+#		waiting for the data tape.
+#
+#		(Side note: The naive encoding would require 2 bits per symbol, and huffman coding would require around 1.25,
+#		so even devore-rep's encoding does pretty well)
+#
+# 3. Devore-rep does three O(n^2) passes over the data tape: Once to copy it, once to retract the construction arm
+#		after the copy, and once to decode the data tape during construction. Mahler-rep does the same three passes,
+#		but implements an optimization to the post-copy retract to only check every 32nd cell.
+#
+#		So mahler-rep effectively only does 2.03 O(n^2) passes over the data tape instead of 3, so it should take 66% the
+#		time. Combining this with the 2.2% above, we should expect mahler-rep to spend around 1.48% as many cycles
+#		waiting for the data tape, almost exactly the same as the 1.46% estimate in section 1.
+#
+#
+#
+# SECTION 3: Overhead Reduction
+#
+# 	The largest contributor to cycle count in Devore-rep is the overhead of executing instructions as it copies and
+# 	decodes the program tape: As established in Section 1, Devore-rep has an overhead of 638 thousand cycles per data
+# 	tape bit, compared to Mahler-rep's relatively tiny 9 thousand cycles per bit.
+#
+# 	There are several things that contribute to this dramatic improvement: 
+#
+#
+#
+# 1. Mahler-rep executes fewer instructions per data tape bit.
+#
+#	Table 1 lists the actual number of instructions executed by each machine, broken up into phases of execution.
+#
+# 					|      TABLE 1: INSTRUCTION COUNT      |
+# 					|     Devore-Rep    |    Mahler-Rep    |
+# Phase 			|  Count  | Per Bit | Count  | Per Bit |
+# ------------------+---------+---------+--------+---------+
+# Copy Setup 		|     252 |       0 |    226 |    0.01 |
+# Copy 				|  688916 |    6.53 |  64107 |    4.13 |
+# Copy Retract 		|  738112 |    7.00 |   3956 |    0.26 |
+# Construct Setup 	|     625 |       0 |     21 |       0 |
+# Construct New Row |    6804 |    0.05 |   2273 |    0.13 |
+# Construct 		|  463827 |    4.40 |  59719 |    3.85 |
+# Construct Retract |  645491 |    6.12 |   8216 |    0.53 |
+# Finalize 			|    1816 |    0.02 |     10 |       0 |
+# ------------------+---------+---------+--------+---------+
+# Total 			| 2545843 |   24.14 | 138528 |    8.93 |
+#
+# 	This table shows modest per-bit gains in the copy phase and construction phases, achieved by removing the need to
+#	constantly call the "toggle_c_and_d" instruction. But most of the improvement comes from the near-elimination of
+#	the "copy retract" and "construct retract" phases.
+#
+#	Mahler-rep introduces 3 new instructions that work together to make this possible: AR_extend_and_increment,
+#	AR_extend_and_increment_2x, and retract_16x. The first two are used while copying or constructing: In addition to
+#	executing an "extend" on the construction arm, these two instructions increment the "A" register.
+#
+#	"A" counts up to 31 and then rolls over, and allows us to branch on whether it currently contains 0 or not. When
+#	we're done copying, we check if it contains a 0. If not, we call AR_extend_and_increment in a loop until we have.
+#	At this point, we know we've extended a multiple of 32 times, and therefore only need to check every 32nd cell when
+#	retracting. This cuts down significantly on both data tape reads and total number of instructions executed, almost
+#	to the point of having negligible impact on program execution time.
+#
+#
+#
+# 2. Mahler-rep implements a new method of carrying out jumps that eliminates the need to read the program tape during
+#		the jump.
+#
+#	Devore-rep jumps by
+#		1: Encoding a "label tape" above the program tape,
+#		2: Encoding a number of labels to jump after each jump instruction,
+#		3: Internally incrementing the number of remaining labels to pass,
+#		4: Reading every bit of label tape as it jumps forward or backward, until it's passed the correct number of
+#			labels.
+#
+#	This is a clever system, but it has some drawbacks: Jump addresses are variable, so it has to read the full jump
+#	address from the program tape, even when skipping the jump, in order to know where to start reading the following
+#	instructions. And as it jumps, it has to read *every* bit that it passes.
+#
+#	Effectively, forward jumps cost the same as executing the instructions it's jumping past, and jumping backwards 
+#	doubles the cost of every instruction it jumps over (Because we must have read the bits of each instruction going
+#	forwards, and again backwards when we jump back over it).
+#
+#	Mahler-rep encodes jump distances as a fixed-length binary number of instructions (not labels) to jump. Because we
+#	know the exact distance to jump, we don't need to read the program tape at all while executing the jump, and can
+#	instead saturate the program arm with extend or retract signals. Furthermore, since jump addresses are a fixed
+#	length, we don't need to read them in order to skip them when a branch is not taken.
+#
+#	It should be clear by now that Table 1 is sort of comparing apples and oranges. It compares instruction counts, but
+#	"instructions" entail a lot more work for Devore-rep than for Mahler-rep. To help make comparison easier, let's
+#	define an "effective instruction" to be any 4 bits read from the program tape. Table 2 shows the same thing as
+#	Table 1, but measured by effective instructions instead of actual instructions:
+#
+# 					| TABLE 2: EFFECTIVE INSTRUCTION COUNT |
+# 					|     Devore-Rep    |    Mahler-Rep    |
+# Phase 			|  Count  | Per Bit | Count  | Per Bit |
+# ------------------+---------+---------+--------+---------+
+# Copy 				| 1588712 |   15.07 |  80659 |    5.20 |
+# Copy Retract 		| 2372494‬ |   22.50 |   4950 |    0.32 |
+# Construct New Row |   36693 |    0.28 |   2489 |    0.16 |
+# Construct 		| 7649623 |   72.55 |  75690 |    4.87 |
+# Construct Retract | 1566278 |   14.85 |  12838 |    0.83 |
+# ------------------+---------+---------+--------+---------+
+# Total 			|13213800 |  125.32 | 176771 |   11.39 |
+#
+#	(Since copy setup, construct setup, and finalize are all so tiny in both machines,
+#		they've been omitted from this and subsequent tables)
+#
+#	Devore-rep does approximately 5.2 effective instructions per actual instruction, while Mahler-rep does only 1.275
+#	effective instructions per actual instruction. Per bit of data tape, Mahler-rep does one eleventh as many reads of
+#	the program tape as Devore-rep. This is the source of most of the reduction in overhead.
+#
+#	Something that might stand out here is the high number of effective instructions for the Devore-rep construction
+#	phase: Compared to the copy phase, the construction phase has 16.5 effective instructions per actual instruction,
+#	while the copy phase has only 2.5 effective instructions per actual instruction. The copy phase's 2.5x seems like a
+#	reasonable number if you consider the fact that it has to read each program tape bit twice, plus a little extra to
+#	read jump addresses. So why does the construction phase have such a significant increase?
+#
+#	This is caused by forward jumps: make-Devore-tape.py places part of its construction phase code *before* the
+#	"end row" code, and part of it after. In the hot path of the construction phase, it has to execute some code
+#	on one side, and then do a massive forward jump to the other side, execute some more code, and then do a massive
+#	jump back. 
+#
+#	This would have been more or less fine in Miahler-rep, but it's a clear demonstration that jumps are *very*
+#	expensive in Devore-rep.
+#
+#
+#
+# 3. Mahler-rep decreases time spent waiting for the program tape round-trip by striping its program tape into 4 
+#		parallel program tapes which are all moved and read simultaneously.
+#
+#	According to measurements made before this optimization was done, during the construction phase Mahler-rep spent
+#	an average of 1,633 cycles per instruction simply waiting for program tape reads, out of a total of 2,668 cycles
+#	per instruction. That's almost 2/3 of the time! It turns out that, for any instruction except those within a few
+#	dozen cells of the machine, the round-trip time	to read an instruction was becoming the dominant factor in
+#	performance.
+#
+#	It's a deceptive problem. Consider the first instruction of the construction phase, which was 168 bits into the
+#	program tape. On the surface, it might seem like the machine would need to wait 168 cycles, which doens't seem so
+#	bad! But the machine has to make this round trip *four times per instruction*. That's 168*8=1344 cycles, just to
+#	read a single instruction, of which there are almost 5 per data tape bit. And that's just for the first
+#	instruction: It gets worse and worse for each instruction. For the whole construction phase, it averages out to
+#	1633 cycles per instruction, of which there are 5 per data tape bit. As a rough approximation, that comes out to 
+#	125 million cycles spent just reading the program tape, just in the construction phase.
+#
+#	If we could read all four bits of an instruction at once, we could go from 8 round trips to 2, cutting the overhead
+#	of reading the program tape to a quarter. Thanks to the jump changes mentioned above, we have a guaranteed size for
+#	our jump addresses. If we choose 8 bits for that guaranteed size (or to 12 or 16 bits), then we have the nice
+#	property that all instructions are guaranteed to be aligned to 4-bit boundaries.
+#	
+#	This alignment means that we can split the program tape into 4 different tapes. In tape 0, we put the first bit of
+#	each instruction, in tape 1 we put the second bit, etc. Bit N is placed in tape N % 4.
+#
+#	This was one of the final optimizations I made to Mahler-rep, and I was susprised at how non-invasive the change
+#	was. Duplicating the read sequence is as simple as passing the sequence through the center of a triode, and
+#	merging the results of the 4 reads is as simple as passing the results back through the same triode. In fact, 
+#	this optimization actually *reduced* Mahler-rep's data tape size, because it eliminated several circuits that kept
+#	track of reading multiple sequential bits.
+#
+#	Even better: This striping optimization doesn't just reduce data tape overhead to 1/4, it reduces it to 1/16,
+#	because A: We only need to wait for one round trip instead of 4, and B: Instructions are 1/4 as far away from the
+#	machine as they used to be, so the one remaining round trip takes 1/4 as long.
+#
+#	After this change, the average data tape overhead in the construction phase of Mahler-rep went from 1633 cycles
+#	per instruction to 108, and other phases saw similar 1/16 reductions.
+#
+#	Table 3 shows measured cycle counts per effective instruction. "Baseline" is the time the signal spends traveling
+#	around inside the machine, "tape overhead" is the time the signal spends doing program tape round trips. "Jump
+#	overhead", only relevant to Mahler-rep, is the cycles the machine spends saturating the program arm with extend/
+#	retact signals while jumping.
+#
+# 					|               TABLE 3: CYCLES PER EFFECTIVE INSTRUCTION               |
+# 					|          Devore-Rep         ||               Mahler-Rep               |
+# Phase 			|          | Tape     |       ||          | Tape     | Jump     |       |
+# Phase 			| Baseline | Overhead | Total || Baseline | Overhead | Overhead | Total |
+# ------------------+----------+----------+-------++----------+----------+----------+-------+
+# Copy 				|     3152 |      340 |  3492 ||      632 |       28 |       42 |   701 |
+# Copy Retract 		|     3152 |      952 |  4104 ||      647 |      309 |       37 |   993 |
+# Construct New row |     3068 |     2340 |  5408 ||      668 |      252 |      152 |  1073 |
+# Construct 		|     2833 |     2666 |  5499 ||      652 |      108 |       53 |   813 |
+# Construct Retract |     3152 |     2820 |  5972 ||      605 |      214 |       34 |   854 |
+# ------------------+----------+----------+-------++----------+----------+----------+-------+
+# Weighted Average  |     2967 |     2096 |  5063 ||      640 |       87 |       48 |   775 |
+#
+#	"Baseline" is significantly smaller for a couple reasons:
+#	- Mahler-rep is much more compact, so the signal has less distance to travel
+#	- In Devore-rep, the cicuitry to produce read signals is all the way on the left side of the machine,
+#		so the read signal has to go all the way across the bottom to the program tape, and all the way back.
+#		In Mahler-rep, it's right next to the program tape so there's less distance to travel.
+#	- The striping optimization means that we only need to issue one tape read signal instead of four
+#
+#	Overall, Mahler-rep spends less than 1/6 as many cycles per effective instruction executed.
+#
+#
+#
+# 4. Combining the results
+#
+#	To determine the overall cycle count for each phase, we can multiply the "total" columns of Table 3 by the "Count"
+#	columns in Table 2, giving the table below:
+#
+# 					|         TABLE 4: Cycle Count          |
+# 					|     Devore-Rep    |    Mahler-Rep     |
+# Phase 			|  Count  | Per Bit |  Count  | Per Bit |
+# ------------------+---------+---------+---------+---------+
+# Copy 				|  5.55e9 |     53k |  5.65e7 |    3.6k |
+# Copy Retract 		|  9.74e9 |     92k |  0.59e7 |    0.3k |
+# Construct New Row	|  0.20e9 |      2k |  0.27e7 |    0.2k |
+# Construct 		| 42.07e9 |    399k |  6.14e7 |    4.0k |
+# Construct Retract |  9.35e9 |     89k |  1.10e7 |    0.7k |
+# ------------------+---------+---------+---------+---------+
+# Total 			| 66.90e9 |    634k | 13.65e7 |    8.8k |
+#
+#	The per-bit totals in the bottom row are very close to the estimates listed in Section 1 (638k/bit for
+#	Devore-rep, and 9k/bit for Mahler-rep), demonstrating that we have established an accurate model for where each
+#	machine spends its time.
+#
+# 	The copy phase sees an order of magnitude improvement in cycle time, and every other phase (Ignoring new row, since
+#	it's so small) improves by two or more orders of magnitude. The fact that the copy phase saw less of a benefit
+#	makes sense: Copy retract and construct retract saw a massive reduction in raw instruction count by only checking
+#	every 32nd bit, and in the construction phase, the jump changes addressed a critical inefficiency in that phase's
+#	use of forward jumps. All phases except the copy phase saw a massive reduction in both baseline instruction cost
+#	and tape overhead from the striping change.
+#	
+#	But the copy phase had no big inefficiencies/redundancies to address. It benefited from the jump changes and
+#	baseline instruction cost improvements, but unlike the other phases, it was already at the front of the program
+#	tape, so tape overhead was a relatively small part of its cost. But even despite the lack of any major weakness to
+#	fix, it is still 14x faster in Mahler-rep than in Devore-rep!
+#	
+#
+#
+# SECTION 4: Conclusion
+# Thanks for reading! When I first started writing this document, I was under the incorrect impression that the O(n^2)
+# cost of reading the data tape was by far the dominant factor in the peformance of both machines.
+#
+# It was only after I started doing measurements that I realized that program overhead was actually the most expensive
+# part of both machines, and this discovery quickly led to the realization that the program tape could be striped.
+# Golly has many "data tape" based self-replicators. Perhaps other self-rep projects could benefit from a similar
+# analysis.
+#
+# I find Devore-rep and Mahler-rep so fascinating not just because I like the idea of a self-replacating cellular
+# automaton, but because it's possible for that cellular automaton to also be a fully functioning, Turing-complete
+# computer. It provides a fascinating way to explore real-life computer hardware, to experiment with ideas like
+# transistors, logic gates, assembly instructions, etc with a rapid turnaround that wouldn't be feasible with physical
+# hardware. My hope in sharing this project is to inspire a similar fascination in others.
+#
+# - Elliott Mahler
+#
+x = 15650, y = 108, rule = Devore2
+.9B2.59A2.60A$.A.G5A.F2A12.2A9.2A32.4A57.2A16.60A2.59A2.A5.3A6.2A.9A
+4.A.4A.5A5.2A.A4.A.2A3.A5.13A.A6.A2.9A5.2A2.5A5.A2.A4.A.A3.A5.2A.A4.A
+.3A6.A.A5.A2.16A2.4A4.A.6A4.A4.23A3.2A2.5A.A.3A3.A5.A2.A4.A.A6.A.A5.A
+2.2A3.A4.A.6A3.3A5.A3.5A2.4A.A.A.A.A2.2A4.A.A2.4A2.A.A.A3.A2.A.6A2.3A
+.A4.A.A6.5A3.A2.A3.A4.A.3A.A.19A4.A.A.3A2.A3.2A.A.A.A.A2.2A4.A.A2.A.A
+4.A.A.A.5A2.A2.A2.A.2A3.6A6.A.A.2A2.A.A.4A4.A3.3A2.2A5.A4.2A2.A3.A2.A
+.A.A.2A.3A4.5A4.A2.A2.A.A.A.A.A.A.A.A2.A2.A4.A3.A.A.2A6.6A2.2A2.A2.8A
+3.A3.2A5.A2.6A2.A3.3A.A.A.A.4A3.4A2.2A4.A2.8A2.A.A.A.A.A2.4A4.A3.2A2.
+2A6.A2.3A.A.5A2.A2.2A2.A5.A4.10A2.A2.A3.2A.6A2.A2.2A4.A3.A2.A.A.A4.A
+2.2A3.A.A.A.A.5A2.A2.5A2.7A2.2A6.7A3.3A2.A2.A.A.A2.A5.5A2.A3.A2.A.A.A
+2.A3.3A3.A2.A2.A3.A.2A.A.A2.A.A.A4.A.A.A.A5.A4.A.A.A2.2A2.5A3.A2.2A6.
+3A.A3.A.A3.A2.A.A.10A.3A2.A2.2A.A.A2.A.A.A2.2A2.A.A3.A2.A2.A.A.6A2.5A
+2.3A2.A.A.A.A3.A.A.A4.A2.2A.A.A2.2A3.A.A2.2A6.4A2.A5.A3.A2.A2.4A.A2.A
+.A.A3.5A.A.4A.A.5A2.A.6A2.A2.A.A.A3.A4.A.A.A4.A2.2A3.9A2.5A.A.A.A.A.A
+.5A2.2A6.A2.A.A.4A2.2A.A.2A2.A2.A.A.A2.A.A.A.A.3A2.A.A.A2.A5.A.A4.A.A
+.A.A2.2A2.2A.A.A4.2A2.5A2.A2.A4.A.A.A2.A2.2A.A.5A2.A.A.A4.2A6.A2.A.A.
+A2.5A.A.A.A.A2.A.A.4A.A.A.A.A3.A2.3A.A4.A.A.A4.A.A.A.9A.A.A2.6A4.A2.A
+2.A2.3A.3A2.A2.A.A.A.A.A.A.A2.A.A.A2.A.3A6.5A.A.A2.A3.A.A2.2A2.A.A.A
+4.A.A.A3.A.A.A2.A5.A2.5A2.A2.A4.A.A.A.A2.A3.A4.A2.A2.A2.A.A.A.A.4A.A.
+A.A.A.A.A2.A.A.4A2.2A.A6.5A2.A3.A.A2.A.A.A.A.A4.A.A.6A2.2A2.A5.A2.A.A
+.A2.A2.A4.A.A.A.4A3.8A2.A2.A2.A.A.A4.A.A.A.A.5A2.A2.4A.A2.2A.A6.4A.A.
+5A2.A.A.A.A.3A3.A3.A4.A3.4A.A.A2.2A2.A2.7A.A3.4A3.A.3A3.A.A.A2.A2.5A
+2.A5.A3.A2.A.A2.A.A.A2.3A6.2A2.A.2A2.A3.2A.A.2A3.A4.A3.A2.A.A.5A2.A2.
+A2.A.A.A2.5A.A3.A.A4.A.A.A2.A4.A2.A5.A3.A2.A.A2.A.A.A.A.2A6.A3.A.A2.A
+2.A.A.A.A2.5A2.A.3A2.A2.A2.3A2.4A2.A2.A.A.A2.A3.A3.A.A2.6A2.A2.A4.A.A
+.4A.A.A3.4A2.A2.5A.A.2A6.A3.A.A2.A2.A.A.A.A2.A.A.A3.A.A2.A2.A2.A3.A.A
+2.4A.A.A2.A3.A3.A.A2.A3.A2.A2.A2.3A.3A2.A2.5A.A.4A.A2.A2.A2.A.4A6.A2.
+6A2.A2.5A2.A2.A.A.A3.A.A2.A2.A2.A3.A.2A.2A3.3A2.A3.A3.A.A2.A3.A2.A2.A
+2.A.A.A.A.A2.2A4.A.A.A2.A2.A2.A.A2.A6.A2.A3.A.A2.A.A.A2.A2.5A4.2A2.A
+2.A2.A.A.8A3.A.A.3A.A.A2.A3.9A2.A2.A2.A.A.A.A.A.A.A4.A.A.A2.7A2.A2.A
+6.2A2.A3.A.A2.A.A.A2.A.A.A3.7A2.A2.A2.A.A.A3.A4.A3.A3.A2.7A2.A4.A2.A
+2.5A.A.A.A.A4.6A.3A3.A2.4A6.A.A.5A.A.A2.5A2.A.A.A3.A.A5.A2.A2.5A3.A4.
+A3.6A2.A2.A2.A.A4.A2.A4.A.A.A2.5A.A.A2.A.A4.A3.2A6.A2.3A2.A.A.A.A.A2.
+A.5A3.A.A5.A2.5A2.6A4.5A2.A.A2.A2.A3.6A2.A2.A4.A.A.A2.A.A.A.A.A2.A.A
+2.6A.A.2A6.A2.A3.A.A.A.A.A3.4A.A2.A.A2.4A2.A3.A2.A.A.2A5.A2.A.A2.A2.A
+3.A3.A2.A2.A2.3A.3A2.A2.A.A.A.A.A2.A.A2.A3.A.A.2A6.16A3.A2.A.A.3A2.5A
+3.A.A.A.A.6A2.A2.2A.A.A2.A.A.2A5.A2.A.A2.6A2.A3.A2.A2.A2.A.A.A.A.A2.
+5A.A.A2.A.A2.A3.A.A.2A6.2A3.A4.A.A2.3A2.A3.A2.4A.A2.A.A.A.A.A.2A4.A.A
+.A.A.8A3.A4.A.A2.A.A4.2A2.6A2.A2.A2.A.A.A.A.A2.A.A3.A2.A.9A.A.2A6.A.
+2A5.5A.A.6A2.A.A.A2.A.6A2.A3.A.2A2.A2.A.A3.A3.A4.A.A2.A.A3.A.A4.A.A.A
+2.A2.5A.A.A2.A.A3.A3.3A2.A3.A.2A6.4A2.A.A.5A2.A5.A.A.A3.A.A.A.A2.4A3.
+A2.A2.10A2.A.A3.A3.A4.A.A2.A.A3.A.A2.A.3A2.A2.A4.A.A.A2.5A.A.A3.A3.A
+3.5A6.A2.A2.A.A.A.A.A2.A5.A2.2A3.A.5A2.A2.A3.A2.A2.2A3.A4.A.6A2.6A2.A
+2.3A.A.6A2.2A2.A.A.A.A2.A4.A.A.A2.A.A.A.A.A3.A3.A3.A.A.A6.A2.A2.A3.A.
+A2.6A2.A2.A2.A2.A.A4.A2.6A2.A2.A.2A4.A.A4.A3.6A2.A2.3A.A.7A.A.A.A.A2.
+A2.3A.3A2.A2.A.A.A.A.A3.7A.A.A.A.A6.A2.A2.A.A.A.A.A2.A3.A2.A2.A2.4A2.
+A4.A.A.A4.A2.A3.A2.A5.A4.A3.A2.2A.A2.A2.A2.A.2A3.5A.A.A2.A2.A.A.A.A.A
+2.5A.A.A2.A.A3.A.A.5A6.A2.A2.6A2.A2.A3.A2.A2.A2.A2.A2.5A2.A.A.A4.A2.A
+3.8A.A.8A3.A3.A2.A2.A4.A3.A.2A.A.A2.A2.A.A.A.A.A.A.A4.A2.A.A3.A4.2A6.
+A2.5A2.A.A.A2.3A2.A2.A2.4A2.A4.A2.A.A.A.A.4A2.A2.4A2.A2.A2.A5.6A3.A2.
+A2.A4.A.A5.A.A.A2.A2.5A.A.A.A.A4.A2.A.9A.A.2A6.A4.A4.5A.A.A2.A2.A.6A
+3.A2.2A2.6A3.A2.A2.A2.A2.A.3A5.A2.A2.A4.6A.A.5A2.A4.A.A.A.A.2A.6A4.A
+4.6A6.4A4.A2.A.A.A.A.A.A.A2.A.A4.A.2A2.2A.5A3.A.A3.A2.A2.A.A2.A.3A5.A
+2.A2.A2.A5.2A3.A2.A.A4.A.A.A.A.4A2.2A4.A4.2A.A.A6.A2.8A2.5A.A.5A2.A2.
+A5.6A.A.A3.A.6A2.A2.A.A2.A.3A5.A2.A2.A2.A4.A.A3.A3.2A2.3A.3A2.A4.A.A.
+A3.5A2.A.A.A.A6.A2.A2.2A4.A.A4.A3.A4.A.A2.A.10A4.7A2.22A2.A2.10A2.A.A
+.2A2.4A2.A.A.A.A.A4.A.A.A3.A.A.A2.A.5A6.2A2.A.2A4.A.2A.A4.6A3.9A5.A2.
+5A3.A.A2.2A2.A.A.A2.A.A.A.A.A.A4.A.A.3A2.A.A.A2.6A.2A6.A2.3A2.A.20A.A
+.A3.9A5.3A3.A3.A.A.A.A2.A.A.A2.A.5A.A.A4.4A2.A2.A.A.4A2.A.2A6.A.A.A4.
+2A3.A.A3.A4.A.61A2.A.A.10A.A.A2.A.A.4A2.A.A3.10A.A2.A2.5A2.A2.A.2A6.A
+.A.5A2.A.13A4.A.2A2.2A.A.A.A.A.A.A.A.A2.3A3.A2.A.A2.4A.A5.A2.A3.A3.2A
+3.2A6.A.A.A.A.A2.A2.6A.12A5.2A2.A2.3A2.A.A.A.A.A3.A3.A3.2A2.A2.A4.A.A
+2.A3.A3.8A6.2A.A.2A2.A2.4A3.74A2.A2.A.A.A.A.A2.3A2.A3.A3.A3.A.A.A.A5.
+A2.A2.A3.3A3.A2.2A.A6.4A2.3A2.A2.A2.12A5.A2.2A2.A2.A.A.5A.A.A.A.A2.2A
+.2A.A.6A2.3A2.6A2.A2.3A3.A3.A2.2A.A6.A2.A3.4A2.A.A.4A.11A4.A.A.A.A2.A
+2.4A3.5A.A.A2.4A3.A.A.A.A.A.A.A.A.A.A.A3.A3.3A2.5A.A6.A2.A.A5.3A2.2A
+2.6A.A.13A.A.13A.A.13A.A.11A2.2A2.A2.A2.A.A3.A3.A.A2.A2.A3.A2.3A2.A.A
+.A.A.A.A.A3.4A.A.3A.A.2A.A6.A2.2A3.A.A2.4A2.2A.A.A.A.A2.A4.A.A.A.A2.A
+4.A.A.A.A2.A4.A.A.A.2A.A5.2A2.A2.A2.A2.A.A3.A3.A.A2.A2.A3.A.A.A.A.A2.
+2A2.3A2.5A.A.A2.A.A2.A.A6.A2.7A2.A2.A4.A.A.A2.2A2.A4.A.A2.2A2.A4.A.A
+2.2A2.A4.A.A2.2A2.A5.A2.A2.A2.2A3.A3.A3.A.A2.6A2.5A.A.5A.A.A4.2A.A.A
+2.A.2A3.A6.A3.A.A.A2.A2.A4.A.A.5A2.6A.A.5A2.6A.A.5A2.6A.A.5A2.6A2.A2.
+A2.7A2.A3.3A2.A.A4.2A4.6A2.A.A.A3.A.A2.5A.A.6A6.A3.A.A.A2.A2.A2.5A2.
+3A2.A3.A.A2.3A2.A3.A.A2.3A2.A3.A.A2.3A2.A3.A.A2.A2.A2.2A.A.2A2.A4.A2.
+A.2A4.A4.A3.A.5A3.A.A2.A.A.A3.A.2A6.3A2.5A2.A2.5A2.A2.A3.A3.A.A2.A3.A
+3.A.A2.A3.A3.A.A2.A3.A3.A.A2.A2.A.A.A3.A2.A4.A4.A4.A4.A3.A.A2.2A3.A.A
+2.A.A.A3.A.2A6.A2.2A2.A2.A4.A2.A2.A.A.2A3.A2.A2.A.A.2A3.A2.A2.A.A.2A
+3.A2.A2.A.A.2A3.A2.A2.A2.A.A.A3.A2.2A2.A.2A2.A.2A2.A.2A2.A.2A4.A.A.A
+3.A.A2.5A3.A.2A6.A.A.A2.A.A2.A.5A2.6A2.2A.4A2.6A2.2A.4A2.6A2.2A.4A2.
+6A2.2A.4A2.A2.A.A.A3.8A2.5A2.5A2.5A2.6A2.A.A.A3.A.A2.A.A.A5.2A6.A.A.
+2A3.6A.A.2A3.A.6A2.A5.6A2.A5.6A2.A5.6A2.A.A2.A.A.A3.2A3.2A2.A2.2A2.A
+2.2A2.A2.2A2.A.A.2A2.2A2.3A2.A.A2.A.A.A5.2A6.A.A.7A.A.2A3.A3.A.A2.2A.
+A2.A5.A2.2A.A2.A5.A2.2A.A2.A5.3A.2A.A2.A.A2.A.A.A2.A.A2.A.A2.A.A.A2.A
+.A.A2.A.A.A2.A3.5A3.A2.A.2A3.2A3.A.2A6.A.A4.A.A3.A3.A3.A.A3.A2.A5.A3.
+A2.A5.A3.A2.A5.A3.A2.4A2.A.A.A2.A.A2.A.4A.A.4A.A.4A.A.4A3.2A2.3A2.A2.
+A.4A2.7A2.2A6.2A.A4.2A3.6A4.2A3.A.A4.A.2A3.A.A4.A.2A3.A.A4.A.2A3.A2.A
+2.A.A.A.A2.A.3A.A.2A.A5.A3.A2.A.2A3.A.A.A.2A2.A2.A.2A.2A2.A3.2A2.2A6.
+14A3.A.8A2.3A2.9A2.3A2.9A2.3A2.9A2.3A2.A2.A.A.A.A4.2A3.A.A5.A3.A4.A3.
+A.A3.A2.2A3.A2.A2.A2.A.A2.2A6.A2.A3.A.A3.A.A4.A3.A.A3.A.A3.A.A3.A.A3.
+A.A3.A.A3.A.A2.4A.A.6A2.A3.5A3.A3.4A.A.3A3.2A3.5A3.A2.6A.A.A2.2A6.A3.
+A.A3.4A4.A3.A.A3.A.A3.A.A3.A.A3.A.A3.A.A3.A.A2.A2.A5.2A2.A3.A.2A3.A4.
+2A3.2A2.4A.A5.6A4.2A.A.A2.2A6.2A4.A3.A2.5A2.5A.A.5A.A.5A.A.5A.A.5A.A.
+5A.A.A3.A.A2.A2.5A3.A2.A.A5.A.A.5A3.A2.A.A2.A2.2A5.A3.A.A.A.A2.2A6.6A
+2.A3.A2.2A2.A2.2A2.A.A.2A2.A.A.2A2.A.A.2A2.A.A.2A2.A.A.2A2.A.A.A3.A.A
+2.A2.A.A.A3.A2.A.A5.A3.A2.6A2.A.A2.A.2A4.A.10A.A.A2.2A6.A2.A2.A3.A.A.
+A4.A3.A.A3.A.A3.A.A3.A.A3.A.A4.A3.A.A2.A2.A.A.3A2.4A.A5.A3.A.A.A.A.A
+3.2A2.A2.2A5.A.A.A.A.A.A.A2.2A6.A2.A2.A.A.3A2.A4.A3.A.A3.A.A3.A.A3.A.
+A3.A.A2.A.2A3.A.A2.A2.A2.3A.A.2A2.A5.A.A.3A2.A2.3A.A.A.A.A.2A4.A.3A2.
+A.A.A.A.A2.2A6.4A2.A3.A.A.55A.A.5A2.A2.A3.A.A.A2.5A3.A3.A.A.A.A.A3.A.
+A.2A.2A4.A.A.A.A2.3A2.A2.2A6.2A.A2.A2.8A.2A2.A.2A4.2A4.2A4.2A4.2A4.2A
+.A.6A2.A2.A2.A3.A.A.A2.A.A.A3.A3.5A.A.A3.15A4.5A.A.A.A.A2.2A6.A3.A2.A
+3.2A2.A4.A3.A.A3.A.A3.A.A3.A.A3.A.A.A.A3.A.A2.A2.6A.A.A2.A.A.3A2.5A3.
+5A2.A4.A.A4.A2.A5.5A.A.A2.2A6.A3.A2.A2.A.A2.2A2.A.2A.A.4A3.4A3.4A3.4A
+.A.5A.A.A3.A.A2.A3.A.A.A.A2.A2.3A.A.2A2.A3.A.2A4.A.A4.A2.A5.A3.A.A2.
+2A6.3A2.A2.A2.A2.A2.3A3.3A2.2A4.2A4.2A4.2A2.A.2A.A.4A3.A.A2.A3.A.A.A.
+A2.A3.A.A.A.A.A3.A2.A.5A2.A2.A2.5A.A.8A3.A.A2.2A6.A2.A2.4A2.A3.A4.A2.
+A3.A.A3.A.A3.A.A4.A3.A2.A5.A2.A2.3A2.5A2.A3.A.A.A.A.6A2.A.A.A.A2.A2.A
+2.A.A.A.A.A.2A5.A2.2A6.A2.A.A5.A3.A4.A2.A3.A.A3.A.A3.A.A4.A.2A4.A.A2.
+A2.A3.2A2.A.6A.A.A.2A5.A.A.4A2.A2.A2.3A2.A.2A5.A2.2A6.6A2.A.A5.47A.2A
+4.A.A2.A2.A3.A2.A4.A.A.A.A.2A5.A2.3A3.A2.A.A.A.A.A.2A5.A2.2A6.A3.A2.A
+3.8A5.13A.A.A2.A2.2A.A2.A2.A4.A.A.A.A.2A5.A3.A3.8A.A.A.2A5.A2.2A6.A3.
+A2.A2.9A5.2A4.A.A.A2.A2.10A2.3A2.5A.2A5.A3.A2.5A.A3.A.A.2A5.A2.2A6.A
+2.3A2.43A2.2A4.A.A4.A.A.A2.A3.A4.A2.A3.2A2.2A4.A.6A2.A3.A5.A.2A5.A2.
+2A6.5A.7A4.A.12A4.A2.6A2.A2.A2.A4.A.A2.A3.A2.3A4.A.A2.A2.A4.A.2A.2A5.
+A2.2A6.A.7A4.A.A4.A.A.A4.A2.A3.A2.A2.A2.A4.A.A2.2A.A2.A2.3A4.A.A2.A2.
+5A3.A.2A4.A.A2.2A6.31A.2A5.3A2.A.A2.3A2.A.A2.A3.A2.A2.A2.A4.A.A2.6A3.
+2A5.3A2.4A2.A.A.A3.A4.A.A5.A2.2A6.A.2A4.A.A4.A.A.A4.A2.6A2.A2.A3.5A2.
+A3.A2.A3.2A5.A3.2A3.A.A.3A2.17A2.2A6.A.2A4.A.2A2.A.6A2.4A.A.A.A.A2.A
+2.A3.A2.A.A.A3.A.A3.2A5.A3.A2.A.A2.3A.A.2A.A.2A.A2.A2.A.5A6.A3.A.A.2A
+4.A.7A3.A.A.A4.A.A.A2.A2.2A.A.A2.A.A.A3.A.2A2.2A4.A.2A.A2.A2.A.A3.A.A
+.A3.A3.A2.A.2A2.A6.6A2.A.A.2A4.A.A3.2A3.A.A.A4.2A.3A2.A.A.A.A.4A.A.
+12A.2A4.A.6A2.A.A3.A.A.A3.A3.A4.A2.A6.5A2.A.4A2.A2.2A.A2.A.A3.A2.A5.A
+2.A.A3.A.A.A.A.7A.A.2A2.A2.2A2.A.2A5.A2.2A4.A.A2.A2.A.6A.A.A3.7A2.A.A
+2.A6.A2.A.A2.A2.A2.A5.A3.5A2.8A2.A2.3A.A.A.A.A2.A.A3.A2.5A2.A.2A5.A.
+3A5.A2.A5.A.A.A.A4.A.A4.A2.A6.A2.A.A2.A2.A2.A5.A3.A.A.A2.3A.A.A.A2.5A
+3.A.A.A2.A.3A2.A3.A3.2A2.A5.A2.A.3A5.A2.A5.A.A.A.A4.A.A4.A2.A6.3A2.5A
+.A.2A.3A2.2A3.2A2.A2.4A.A2.A.A.2A2.A3.A.A.5A.A.A3.3A.4A.A.6A.2A.3A.2A
+.4A.A.5A2.A.2A4.2A.2A.2A4.3A2.2A4.2A3.A.A.2A2.3A.A2.A.2A.2A2.2A2.2A.
+2A.A2.2A.4A.2A.3A.A.A.A3.3A.4A2.A.A.A.2A.A2.A2.7A3.A3.A.A.A2.A2.A.A.A
+2.A.A.A3.A2.7A2.A2.A3.A3.13A2.8A2.12A3.4A2.5A.A4.A.2A.A.3A2.A6.7A2.A
+2.A2.A.A3.A2.10A2.5A2.A.A.A3.A2.A2.A.A2.A2.A3.A3.A5.A.A.A.A4.A.A2.A.
+2A4.A.A2.A.2A3.A5.7A.A.A6.4A2.A3.A2.A2.A.A3.5A3.A4.A.A2.4A.2A3.A2.A2.
+A.A2.A2.A3.2A2.A4.A.A.A.A.A4.A.A2.A.2A5.3A3.A3.2A4.A.A.A.A6.4A3.A.3A
+2.7A.A5.A3.A4.A.A.A.A.A5.A2.7A2.A2.A2.4A2.A4.A.2A2.8A2.4A.2A4.A.A3.2A
+3.2A4.A.A.A.A6.A3.A.A3.2A2.A2.A5.A2.A5.5A2.A4.3A3.A.A.A.A2.A2.A2.7A.A
+4.A.2A2.A2.A.2A2.2A4.A.A3.A.3A5.A.A.A6.5A.A.A2.A.A2.A2.A5.2A2.5A2.A.A
+.A2.A4.2A.A5.A.A.A2.A2.A.A5.A.A4.A.A.A4.A.A3.2A5.6A.3A5.5A6.2A.3A.6A
+3.A3.4A2.2A2.3A.4A2.A3.A.2A3.2A2.3A.2A.5A3.A2.A2.2A.A2.5A.2A2.6A.A2.
+3A.2A.2A3.3A2.A.A.2A.A2.A.A.A2.A.A.2A.2A.2A.A2.2A.A2.A3.A3.A.A.3A2.3A
+.3A.2A2.2A.A2.A.A.A3.A.A.A3.3A2.A.A4.A.A.A.2A3.4A4.6A2.A.A.A2.A.A.A2.
+A.A.4A2.A.5A.A.A2.A2.A.A5.A2.A.A.A.A.A4.A.A.3A5.A.A.21A2.2A6.A.A.7A2.
+A4.2A.A.A2.2A2.A2.5A2.A.A.A2.A2.A.A.A.A.A.A2.A2.A2.A.A2.A2.7A.8A2.17A
+3.A.A.A2.3A5.2A6.6A3.A5.A4.A3.5A2.A.A.A2.A2.A.A.A2.A2.A.A.A.A.A.A2.A
+2.A2.7A2.A2.2A.A2.A.2A3.2A.2A5.6A.A.A.3A4.A.3A6.4A2.2A5.A4.A.A.3A2.8A
+2.A2.A2.5A2.A.2A.3A.A.A2.A2.A2.A2.A.A2.A2.A5.A3.2A.3A4.A.28A6.A2.A5.
+4A2.5A2.A.A.A.2A5.A2.A4.A2.A.4A3.A2.A2.A2.A2.A.A2.A2.A5.A3.A3.7A5.2A
+6.6A2.4A2.A2.A.A.A2.A.A.A3.A5.3A2.A4.2A3.A.A3.A2.A2.A2.A2.A2.A2.8A.A.
+A3.A3.7A5.2A6.2A.3A.8A.A3.A5.2A.A2.A.4A.2A3.A4.A4.4A.3A.A.A3.2A.2A.A.
+2A.5A.2A.2A2.4A.A.A.4A.4A.A.3A.A2.A3.A4.A.A.A3.A4.A.A.A4.A.A3.A.3A2.A
+2.A.A.A5.A.A5.A.A5.3A2.A.A4.A.A2.3A.A2.A2.2A2.A2.A.A.11A2.2A.A.9A3.A.
+2A.4A2.A2.A2.4A2.A.A.A2.A.A.A.A3.A3.3A4.A.2A.A2.A.A2.A.A2.A.A2.2A6.A
+2.A2.A2.5A2.A2.A2.3A.A.A3.A2.A3.A.2A.A.A2.5A.4A3.A2.A.A.A3.A.A.A2.A.A
+.A.A3.A3.3A5.26A6.7A2.A2.4A.A.A2.A2.A2.A2.A.A3.4A3.A.A3.4A2.A3.A3.A2.
+A2.3A.A.A.A.2A.5A.A.A3.A.3A4.A.4A2.A2.A2.A2.A2.A2.A2.A2.2A6.4A3.A.A.A
+4.A.4A2.A2.A3.3A.A.A2.A3.A.A3.A.A2.A3.A3.A4.A.A5.4A4.A3.A.3A4.A.A2.A
+2.A.A2.A.A2.A.A2.A.2A6.A3.A.2A.2A5.A2.3A.A.A3.A2.A3.A.3A2.A.A2.6A3.A
+4.A.A5.A2.A2.A.2A3.A.3A4.A.A2.A2.A2.A2.A2.A2.A2.A2.A2.2A6.10A.2A5.2A.
+A.5A2.6A.A4.A.A2.A.4A.A4.A.17A2.8A3.A.3A5.5A2.4A2.4A2.4A2.5A6.10A4.2A
+2.7A.A.6A.3A.8A3.A.A2.3A.7A.A.2A2.A.A.7A.5A2.3A.3A2.3A.4A.A.4A.2A.A.A
+4.A.3A2.A.A4.2A.A.A3.A3.2A.A2.A.A.2A.3A.A2.A.A.A.2A3.A.A3.A.A.2A.A.2A
+.4A3.A4.A.17A3.3A4.A.2A.3A5.2A4.2A3.2A5.A3.7A4.A.A6.A2.3A4.A.4A.3A5.A
+.A5.A3.2A5.A3.7A4.A.A6.25A2.22A.A5.20A3.7A4.A.A$.9B.2A12.A11.A34.2A
+58.A$11.A12.3A3.5A2.2A4.23A6.A6.6A29.16A2.A8.A$9.3A2.6A5.A4.A3.A2.4A
+2.A17.A3.A3.4A2.5A4.A24.6A13.2A2.A8.A$5A4.2A5.A2.A2.5A3.A9.A2.A17.A3.
+A3.2A4.A2.3A3.A6.19A3.3A13.A2.A4.5A$A3.A4.A6.A2.A2.A3.A3.A3.A5.A2.A6.
+5A6.3A.A3.A5.A4.A2.2A6.A16.3A4.A6.4A3.A2.2A3.A$A2.2A4.A6.4A2.A3.A3.A
+2.8A2.A6.2A2.4A4.4A3.A3.3A4.A2.6A2.A18.A4.8A2.A2.2A2.6A$A2.7A2.5A2.A
+2.5A3.A3.A4.2A2.A6.A3.A2.A4.A6.2A2.A2.6A.A4.A2.A2.10A6.A10.2A2.A2.5A
+3.3A2.A$A2.A4.5A2.2A2.A3.A6.A8.A3.A6.A3.A2.A3.2A7.A2.A2.A4.3A4.A2.A3.
+A2.A4.A2.5A10.A3.A2.A2.3A4.7A$A2.A7.2A2.A3.2A2.A6.A3.A4.A3.A5.3A2.5A
+2.6A3.A2.A2.A4.A5.2A2.A3.A2.A3.2A2.A2.3A.9A3.A2.A4.A7.A.2A$A2.5A3.A3.
+A3.5A2.9A4.2A2.A6.A3.A6.A4.A3.A2.A2.6A5.5A3.4A3.5A4.A3.A2.A.3A2.A2.A
+4.A10.4A$A6.A3.A2.5A3.2A2.A2.A3.A6.A2.A2.5A2.2A6.A3.2A2.2A2.A3.A9.A
+10.A3.A2.3A3.A3.A2.A3.A2.A2.2A3.2A2.4A3.A2.A$2A5.A3.A2.A3.A3.A3.A2.A
+2.3A.2A2.A2.A2.A6.6A2.A3.9A3.A9.A9.3A2.A4.A3.A3.4A3.A2.A3.A3.5A2.A3.A
+2.A$.A2.4A3.A2.A3.A3.A3.4A3.A3.A2.A2.A2.A6.A4.A2.A3.A11.A2.5A2.A10.A
+3.A4.A3.A6.A3.A2.2A2.A7.A2.A3.5A$.A2.A.3A2.A2.5A3.A3.A6.A3.A2.A2.A2.
+8A4.4A3.A11.A2.A3.A2.A10.2A2.6A3.A6.A3.A3.A2.A7.A2.5A$2A2.A3.A2.A5.A
+4.A10.5A2.A2.A3.A4.3A7.4A4.A.6A2.A2.2A2.A3.4A4.A6.A4.A4.3A3.A3.A2.5A
+3.4A$A3.A3.A2.A5.A4.A10.A6.A2.A3.A6.A7.A.4A2.A3.A2.A2.A2.5A3.A2.A4.A
+6.A4.2A3.2A4.A2.2A5.2A$A3.5A2.A2.4A4.A3.4A3.A6.A2.A2.6A2.A7.A4.A2.A3.
+A2.A2.4A2.3A2.A2.A2.3A5.5A2.A3.A5.A2.A7.A$3A5.A2.A2.A.3A3.5A2.A2.3A.
+2A2.A2.A2.A4.A2.A7.A4.A2.A3.4A2.A7.A2.A2.A2.A7.A3.A2.A3.A5.A2.A7.A$2.
+A5.A2.A2.A3.A6.2A2.A3.A3.A2.A2.A2.A4.A2.A7.A4.A2.3A4.2A.A7.A2.A2.A2.A
+7.A3.A2.A2.5A2.A2.6A2.A$2.A2.7A2.A3.A6.A3.A3.A3.A2.A2.A2.9A4.A2.A3.3A
+3.A4.8A3.A2.A2.A2.2A6.5A2.A2.A3.A2.A7.A2.A$3A2.A4.3A.5A6.A3.A3.5A2.A
+2.A6.A2.7A2.A4.A4.A6.A4.A3.A2.A2.A2.7A4.A3.A2.A3.A2.A7.A2.2A$A4.A6.A
+5.A3.5A2.A3.A6.A2.A6.A5.A2.A2.6A4.A6.A4.5A2.A2.A8.A4.A3.A2.5A2.A3.5A
+3.A$A3.6A2.A5.A3.A3.A2.A3.A6.A2.A2.6A4.A2.A2.A5.5A6.6A2.5A2.A8.A4.5A
+5.A3.A3.A2.3A2.A$A3.A4.A2.A5.A3.A3.A2.A2.3A.2A2.A2.A2.A4.A4.A2.A2.A5.
+A14.A5.A4.A2.4A2.A5.A.3A4.A3.A3.A4.A2.A$A3.A4.A2.A5.A3.5A2.A3.A3.A2.A
+2.A2.A4.A2.6A2.A5.A14.A5.A3.2A2.A2.6A3.A3.A4.5A2.3A3.A2.A4.16A$A3.9A
+5.A4.A5.A3.A3.A2.A2.A2.6A2.2A6.A5.A13.8A3.A3.A6.2A3.A3.A5.A.3A2.A4.A
+2.3A2.A13.2A$A7.A2.3A4.A4.A5.A3.5A2.A2.A3.A6.A7.A5.A13.A4.A5.A2.2A7.A
+2.6A5.A3.A2.6A3.5A14.A$4A4.A4.A4.A3.5A2.A3.A6.A2.A2.3A5.A7.A5.A13.A4.
+A5.10A2.A2.A4.4A2.A3.A7.A3.A10.5A3.A2.4A$3.A4.A4.A4.A3.A3.A2.A3.A6.A
+2.A3.A5.2A2.6A3.3A2.A2.6A2.6A13.2A2.A2.A4.A2.A2.5A7.2A2.A10.A3.A3.A2.
+A2.A$3.A3.7A4.A3.A3.A2.A2.3A.2A2.A2.A3.A3.7A3.3A2.A2.6A4.A6.A15.A2.A
+2.6A2.A6.A5.A2.A2.A2.6A2.A7.A2.A2.A$4A3.A4.A5.A3.5A2.A3.A3.A2.A2.A3.
+5A4.2A5.A2.A2.A.A2.A4.A6.A10.A4.A2.A6.A3.A6.A2.4A2.A2.A2.A4.A2.A3.A3.
+A2.A2.A$A6.A4.A5.A6.A3.A3.A3.A2.A2.A3.2A7.A6.A2.A2.A4.A4.8A3.8A4.A2.A
+6.A3.A2.5A2.A2.A2.A2.A2.A4.A2.A2.6A2.A2.A$A3.9A5.A6.A3.A3.5A2.A2.A3.A
+8.A6.A2.A2.A4.6A10.A2.A2.4A2.A2.4A3.A3.A2.A6.A2.4A2.A2.A2.3A2.A3.A2.
+5A2.A$5A6.A6.6A.A3.A3.A6.A2.5A3.6A6.A2.A2.A20.A2.A2.A2.A2.A4.6A2.2A2.
+A4.6A5.A2.A3.5A6.A6.A$3.2A6.A6.2A2.4A3.A3.A6.A5.A4.2A10.A2.A2.A20.A2.
+A5.A2.A4.A7.5A.A2.2A9.A2.A3.A3.A3.A2.A6.4A$3.A5.5A4.A3.A6.A2.3A.2A2.
+2A4.A4.A11.A2.A2.A20.A2.A5.A2.6A7.A3.6A10.A2.5A3.5A2.8A2.A$4A5.A3.A4.
+A3.A6.A3.A3.A2.4A2.2A3.A2.10A2.A2.22A2.7A6.10A5.A13.A6.A17.A2.A$A.5A
+2.A3.A2.3A3.A6.A3.A3.A5.A3.A2.2A2.A7.5A2.A60.6A6.A.A15.A2.2A$A5.4A3.A
+2.A2.4A6.A3.5A5.A3.A2.A3.A7.A4.3A60.A3.20A5.3A2.A$A5.A2.5A2.A2.A.9A4.
+A5.4A3.A2.A3.10A3.A2.61A13.A7.2A6.A3.A$A4.2A4.A4.A2.A8.4A2.A5.A4.3A2.
+A3.A3.A3.A3.2A2.2A81.A2.5A3.A$7A4.A4.A2.A11.A2.2A4.A4.A4.A3.A3.A2.3A
+2.A2.2A74.6A2.A2.A3.A3.A$.A2.A4.3A4.A2.A2.A8.A3.A4.A4.A4.A2.3A2.A3.A
+3.A2.A2.74A4.4A2.A2.2A3.2A$.A2.A4.A4.3A2.A2.6A2.3A2.6A3.2A.A2.A3.A3.
+5A3.A2.A2.2A2.A76.A2.A2.3A2.4A$.4A2.3A4.A4.A3.A3.A3.A3.A3.A4.4A2.A3.
+5A4.4A2.A2.A3.A69.4A3.A2.4A4.A2.A$.A3.3A3.4A4.A3.A3.A3.A2.3A2.A4.A2.A
+2.A7.A4.A5.A2.A2.2A2.11A3.13A3.13A3.13A3.6A2.2A2.3A8.A2.A$5.A5.A3.5A
+2.3A2.2A2.A3.A3.A4.A2.A2.A7.A4.A5.A2.A2.A2.2A8.2A3.A11.A3.A11.A3.A11.
+A3.A3.2A2.4A2.A7.2A2.A$4.2A5.A3.2A6.A3.5A3.5A2.6A2.A7.A4.A4.2A2.A2.A
+2.A10.2A2.A11.2A2.A11.2A2.A11.2A2.A3.A6.A2.A2.7A2.A$5A3.5A2.A7.A3.A2.
+6A6.2A6.A5.3A4.A2.7A2.A2.A2.6A2.5A3.6A2.5A3.6A2.5A3.6A2.5A3.A6.A2.A2.
+A3.A4.A$A7.A3.A2.A7.5A7.A6.A6.2A5.A6.A2.2A3.2A2.A2.A2.A7.A2.3A2.A7.A
+2.3A2.A7.A2.3A2.A7.A2.3A2.5A2.A2.A2.A3.A4.A$A7.A3.A2.A7.2A2.A7.A6.A6.
+A6.A6.A2.A4.A3.A2.A2.A7.A4.A2.A7.A4.A2.A7.A4.A2.A7.A4.A2.A2.5A2.A2.5A
+2.3A$A7.5A2.A7.A3.A6.2A5.2A5.2A5.2A5.2A2.A4.A3.A2.A2.A2.A4.2A3.A2.A2.
+A4.2A3.A2.A2.A4.2A3.A2.A2.A4.2A3.A2.A2.A6.A2.A2.2A2.A$A8.A5.A7.A3.A2.
+6A2.5A2.5A2.5A2.8A4.A3.A2.A2.4A.A2.6A2.4A.A2.6A2.4A.A2.6A2.4A.A2.6A2.
+5A5.A5.A3.A$A8.A5.A5.3A2.2A2.2A3.A2.2A2.A2.2A2.A2.2A2.A2.2A4.2A4.A3.A
+2.A5.6A10.6A10.6A10.6A7.2A3.6A4.2A3.A$A7.2A4.2A5.A4.5A4.A2.A3.A2.A3.A
+2.A3.A2.A5.A5.A3.A2.A5.A.A.2A10.A.A2.A10.A.A2.A10.A.A2.A7.A4.2A3.7A3.
+A$A2.7A2.4A5.A2.3A2.2A4.4A3.4A3.4A3.4A5.A5.A3.A2.4A2.A4.A10.A4.A10.A
+4.A10.A4.A7.A4.A4.A9.A$A2.2A4.A2.2A.A5.A2.2A3.A7.2A5.A4.A8.2A3.3A5.A
+3.A5.A2.A4.2A9.A4.2A9.A4.2A9.A4.2A6.6A4.2A6.A.A$A2.A5.A2.A2.A4.2A2.A
+4.A7.A6.A4.A8.A4.2A6.A3.A5.A2.3A2.9A2.3A2.9A2.3A2.9A2.3A2.8A7.14A$A2.
+A3.6A2.A4.5A4.2A4.3A3.4A4.A4.5A4.A2.6A3.4A2.A7.A7.A7.A7.A7.A7.A7.A6.A
+7.A7.A2.A$A2.A3.2A6.6A8.4A2.2A4.2A6.A4.2A7.A2.2A10.A2.A7.A7.A7.A7.A7.
+A7.A7.A6.4A4.A7.A$A2.A3.A7.A16.A2.A5.A4.5A3.A8.A2.A4.5A2.A2.A7.A3.5A
+3.5A3.5A3.5A3.5A3.5A2.5A2.A4.A6.2A$A2.A3.10A15.A2.A5.6A2.A4.A8.A2.A4.
+A3.A2.A2.A7.A3.A2.2A3.A2.2A3.A2.2A3.A2.2A3.A2.2A3.A2.2A2.A2.2A2.A4.A
+2.6A$A2.A3.A3.A3.A16.A2.2A4.A3.A3.A4.A8.4A2.3A3.A2.A2.A7.A6.A7.A7.A7.
+A7.A7.A6.A3.A4.A2.A2.A$A2.A3.A3.A2.3A15.A3.A3.3A2.A2.3A3.A10.2A3.3A2.
+A2.A2.A7.2A5.A7.A7.A7.A7.A7.A6.A2.3A3.A2.A2.A$A2.A2.3A2.A3.A15.2A3.A
+4.A3.A3.A4.A4.5A2.A3.A4.A2.A2.5A3.55A3.A4.A2.4A$A2.A3.A3.5A6.15A4.A3.
+5A4.A4.A3.A2.A3.A4.A2.A2.A2.6A3.2A6.2A6.2A6.2A6.2A6.2A5.2A.7A2.A2.A.A
+$A2.A3.5A10.A6.A11.5A4.5A2.3A3.A2.A3.6A2.A2.A7.A3.A7.A7.A7.A7.A7.A6.A
+2.2A4.A2.A4.A$A2.A7.A10.A6.A15.A4.A2.2A3.3A2.A2.A3.A7.A2.A7.A3.5A3.4A
+4.4A4.4A4.4A3.2A5.2A2.A5.A2.A4.A$A2.A7.8A3.5A2.A2.A2.5A5.A4.A3.A3.A4.
+A2.A3.A7.A2.A7.4A3.2A5.2A6.2A6.2A6.2A2.3A4.3A2.A2.A2.A2.A2.3A$A2.A14.
+A3.A3.A2.A2.A2.A3.A5.6A3.A3.A4.A2.5A2.3A2.A2.A10.A4.A6.A7.A7.A7.A2.A
+6.A4.A2.4A2.A2.A$A2.A14.A2.3A2.A2.A2.4A3.A14.A3.6A5.2A4.A2.A2.A15.A6.
+A7.A7.A7.A2.A6.A4.A8.A2.A$A2.A14.A3.A3.A2.A4.3A2.A14.A3.A11.A4.A2.A2.
+A15.47A8.A2.6A$A2.A14.A3.8A4.A4.A14.A3.A11.A2.A.A2.A2.A3.13A54.A2.A4.
+A$A2.A14.A7.A.4A2.A4.A14.5A2.3A2.10A2.A2.A3.A6.2A58.A2.A4.A$A2.A14.A
+12.A2.6A17.2A4.A2.A6.A4.A2.A3.A6.A17.43A2.3A2.A$A2.A14.2A11.A2.A23.A
+4.A2.A11.A2.A2.6A2.A6.12A45.5A$A2.A15.A4.5A2.A2.A23.A2.A.A2.A11.A2.A
+2.A4.A2.A6.A3.A6.A45.A$A2.A8.A6.A4.A3.A2.4A2.3A18.6A2.A11.A2.A2.A4.A
+2.A5.3A2.A5.3A14.31A$A2.17A2.3A3.A4.2A4.A18.A2.A4.A2.5A4.A2.A2.6A2.A
+6.A3.A6.A15.A$4A5.A2.A.A3.2A3.3A2.A5.A4.A18.A7.A3.A2.A4.A2.A2.A3.A3.
+4A2.6A5.2A15.A$2.2A5.A4.A4.A3.A4.A5.A2.A.A17.2A7.A3.A2.A3.2A2.A2.A3.A
+6.A3.A4.7A15.A7.A$2.A6.A4.A4.A3.A4.A5.6A15.12A3.4A3.A3.A2.3A.A6.A3.A
+4.2A4.A15.A5.6A$2.A5.7A4.A3.6A5.A2.A17.A14.A2.2A2.A2.2A3.7A3.A3.A4.A
+5.A10.A4.A5.A.A2.A2.4A5.5A$2.A6.A9.A3.A10.A20.A14.A2.5A2.A4.A5.A3.A3.
+3A2.A2.8A2.5A4.A10.A2.A2.A5.A$2.A6.A9.A3.A10.A20.A2.A10.2A4.A4.A2.3A
+5.A3.A4.5A2.A3.A.2A2.A3.A4.A10.A2.A2.A5.A$2.3A3.2A9.5A2.4A4.12A2.8A2.
+13A4.A4.A2.A2.7A2.A4.A3.A2.A3.A2.A2.A3.A4.A4.7A2.A2.A.A3.A5.4A.2A4.A
+3.A.2A.A.3A.A2.A.A.A2.2A2.2A.A5.A.2A2.2A3.A4.2A6.2A2.3A6.2A.A.A6.2A5.
+5A3.4A.A.2A.A.5A3.4A.2A4.A3.5A3.A4.A2.2A3.A2.A.3A2.A2.2A4.2A2.3A.A3.
+5A2.3A$3.7A12.2A5.A15.A2.A9.A3.A12.A4.A2.A2.A5.A2.A4.A3.A2.5A2.10A2.A
+4.A5.A2.A2.7A$3.A19.A4.3A14.A2.A9.A3.A11.2A4.A2.A2.A5.A2.A4.2A.3A2.A
+13.5A4.A5.A2.A4.A2.4A$3.A19.2A4.A15.4A2.8A2.2A11.4A2.A2.A2.7A2.A8.A3.
+A13.A8.7A2.3A7.4A$3.A20.A4.A17.2A5.A2.2A9.7A2.A2.A2.A3.A7.3A6.A2.5A
+10.A10.A2.2A4.A7.A$4A20.6A18.A9.A9.A8.A2.A2.A3.A8.2A6.A2.A3.A2.5A2.2A
+10.A2.A5.A3.5A$A2.21A3.A20.A9.A3.A5.A8.A2.A2.A3.5A5.4A3.A2.A3.A2.A3.A
+2.6A6.4A4.2A3.A9.A2.3A4.A3.A4.A3.A2.A.A2.2A.2A.2A2.3A3.A4.A4.A2.A.A2.
+A.A.A.A3.A2.A3.A2.A.A3.A2.3A4.2A.A.2A2.A.5A2.2A.4A2.A.A2.A2.A4.5A.A.
+2A2.2A4.2A7.A2.4A.2A2.2A2.4A4.A4.6A.2A.A$A22.A3.A4.17A2.8A.6A2.A2.A5.
+A2.A2.A3.A3.A5.A2.A3.A2.5A2.A2.2A2.A3.2A6.A2.7A3.A$2A21.A3.6A14.2A4.
+2A5.A.A2.A2.7A2.A2.A2.A3.A3.A5.A2.A3.A2.A2.A3.A2.5A4.A6.A12.6A$27A21.
+2A4.A10.A2.A5.A2.A2.A2.A3.3A.A5.5A2.A2.A2.8A2.3A3.A6.A16.4A$A48.A4.A
+10.A2.A5.A2.A2.A2.A4.4A5.A6.A2.A14.A3.A2.5A2.4A10.A$A48.A4.A3.8A2.A2.
+A2.A2.A2.A2.A4.A7.2A6.A2.3A12.A3.A2.A3.A2.A2.4A2.6A$A2.A5.A5.A5.A.A
+25.A4.A3.A5.A3.A2.4A2.A2.A2.4A.A7.9A3.2A2.11A3.A2.A2.2A2.A2.A.2A2.A9.
+A2.3A8.A8.A8.A5.A2.3A7.A9.A13.A3.A6.A4.A2.A.2A3.4A.3A3.A.3A2.2A.A.4A.
+A3.2A.A4.A3.3A.3A6.A6.A4.2A.3A5.A.A12.A.7A.2A.A$25A24.A4.A3.A5.A3.A4.
+A3.A2.A4.4A.4A2.A3.2A7.A2.A4.A3.3A2.A2.A2.5A2.A2.A2.A$A2.A2.A2.A2.A2.
+A2.A2.A2.4A21.A4.A3.5A.A3.A3.3A2.A2.A4.A4.A2.4A4.A7.4A4.A5.A2.A2.A2.A
+3.4A2.A2.7A$A5.A5.A5.A5.A2.A21.A4.A6.4A8.A6.A4.A4.A2.A7.A7.A2.A3.3A4.
+A2.A2.4A9.A7.4A$A2.A2.A2.A2.A2.A2.A2.A2.A2.A21.A4.2A5.A2.A8.A6.A4.6A
+2.A5.3A7.A2.A4.A3.3A2.A14.2A7.A$4A2.4A2.4A2.4A2.5A20.A4.8A2.17A9.4A5.
+A9.6A2.5A3.2A14.10A$49.A18.2A6.2A20.2A25.17A13.4A.A3.2A3.A4.A7.2A3.A
+5.A.2A.A3.A2.A.A4.A4.A3.2A6.A5.3A9.A.A.3A3.4A.2A2.3A.2A2.5A.6A3.A2.2A
+3.7A.2A2.A7.8A.2A.5A3.7A2.2A6.10A$49.A18.A8.A20.4A23.A31.2A36.A7.A8.A
+22.A9.A2.A2.A.A3.A24.A10.A6.A9.A6.A13.A7.A7.A7.A$49.20A8.22A2.25A!
