@@ -10,3 +10,6 @@ Mahler-rep is 160x faster than Devore-rep, the Devore ruleset replicator package
 ![Side-by-side comparison of Devore-rep and Mahler-rep](images/mahler_rep_comparison.png)
 
 For a breakdown of the optimizations Mahler-rep has over Devore-rep, check out the comments for Mahler-rep.rle
+
+## Demo
+![Demo of signal propagation](images/signal_demo.mp4)
